@@ -3,7 +3,6 @@ import 'dart:isolate';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:flutter_litert/flutter_litert.dart';
-import 'package:flutter_litert/src/tensor.dart';
 
 /// Service kelas kustom untuk menangani klasifikasi citra makanan on-device
 /// menggunakan model LiteRT (TFLite) dan paket modern `flutter_litert`.
