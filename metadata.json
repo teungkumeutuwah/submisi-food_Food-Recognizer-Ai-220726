@@ -1,0 +1,11 @@
+{
+  "name": "Food Recognizer AI",
+  "description": "Analisis nutrisi makanan, verifikasi kehalalan, dan resep hidangan tradisional Indonesia menggunakan Gemini AI.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
