@@ -645,7 +645,7 @@ app.post("/api/classify", async (req, res) => {
                 mimeType: mimeType
               }
             },
-            "Identify the single primary food item or object in this image. Respond with a raw JSON object containing these keys: 'name' (string, the name in Indonesian, capitalised, e.g., 'Sate Ayam', 'Nasi Goreng', 'Mie Aceh', 'Lontong Sayur', or if it is not a food, the object name like 'Laptop', 'Buku', 'Kunci'), 'isFood' (boolean, true if it is an edible dish/food, false otherwise), and 'confidence' (number, a float between 0.8 and 0.99 representing classification confidence)."
+            "Identify the single primary food item or object in this image. Respond with a raw JSON object containing these keys: 'name' (string, the name in Indonesian, capitalised, e.g., 'Sate Ayam', 'Nasi Goreng', 'Mie Aceh', 'Lontong Sayur', or if it is not a food, the object name like 'Laptop', 'Buku', 'Kunci'), 'isFood' (boolean, true if it is an edible dish/food, false otherwise), and 'confidence' (number, a float between 0.8 and 0.99 representing classification confidence). IMPORTANT: If there is no clear food item, edible dish, or prominent object of interest (for example, if the image shows just a blank background, blurry environment, floor, wall, hands, or nothing identifiable), you MUST return 'Belum ada objek' as the 'name', false for 'isFood', and 0.0 for 'confidence'."
           ],
           config: {
             responseMimeType: "application/json"
@@ -656,9 +656,9 @@ app.post("/api/classify", async (req, res) => {
         const cleanJson = extractFirstJSONObject(text);
         const data = JSON.parse(cleanJson);
         return res.json({
-          name: data.name || presetName || "Sate Ayam",
-          isFood: data.isFood !== undefined ? data.isFood : (presetName ? presetName.toLowerCase() !== "laptop" : true),
-          confidence: data.confidence || 0.92
+          name: data.name || presetName || "Belum ada objek",
+          isFood: data.isFood !== undefined ? data.isFood : (presetName ? presetName.toLowerCase() !== "laptop" : false),
+          confidence: data.confidence !== undefined ? data.confidence : 0
         });
       } catch (geminiErr: any) {
         const errMessage = String(geminiErr?.message || geminiErr);
@@ -675,13 +675,11 @@ app.post("/api/classify", async (req, res) => {
             isQuotaExceeded: isQuota
           });
         }
-        // Fall back to a random delicious local food
-        const randomIndex = Math.floor(Math.random() * FALLBACK_LABELS.length);
-        const name = FALLBACK_LABELS[randomIndex];
+        // In real-time scanner background, if Gemini fails, do not return a random food. Return "Belum ada objek"
         return res.json({ 
-          name, 
-          isFood: true, 
-          confidence: 0.88,
+          name: "Belum ada objek", 
+          isFood: false, 
+          confidence: 0,
           isSimulated: true,
           isQuotaExceeded: isQuota
         });
@@ -692,9 +690,8 @@ app.post("/api/classify", async (req, res) => {
         const isFood = presetName.toLowerCase() !== "laptop";
         return res.json({ name: presetName, isFood, confidence: 0.96 });
       }
-      const randomIndex = Math.floor(Math.random() * FALLBACK_LABELS.length);
-      const name = FALLBACK_LABELS[randomIndex];
-      return res.json({ name, isFood: true, confidence: 0.88 });
+      // In real-time scanner background, if offline, do not return a random food. Return "Belum ada objek"
+      return res.json({ name: "Belum ada objek", isFood: false, confidence: 0 });
     }
   } catch (err: any) {
     console.error("Classification endpoint crash:", err);

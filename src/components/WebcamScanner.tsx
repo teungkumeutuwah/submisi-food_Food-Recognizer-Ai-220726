@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Camera, Sparkles, AlertCircle, Upload, Image as ImageIcon } from "lucide-react";
+import { ArrowLeft, Camera, Sparkles, AlertCircle, Upload, Image as ImageIcon, Volume2, VolumeX } from "lucide-react";
 
 interface WebcamScannerProps {
   onCapture: (base64Image: string) => void;
@@ -61,6 +61,95 @@ const imageUrlToBase64 = (url: string): Promise<string> => {
   });
 };
 
+// Helper to play a subtle camera shutter sound effect dynamically using Web Audio API
+const playShutterSound = () => {
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const audioCtx = new AudioContextClass();
+    
+    // 1. Shutter "click" - high frequency white noise burst
+    const bufferSize = audioCtx.sampleRate * 0.08; // 80ms
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+    
+    const noise = audioCtx.createBufferSource();
+    noise.buffer = buffer;
+    
+    const bandpass = audioCtx.createBiquadFilter();
+    bandpass.type = "bandpass";
+    bandpass.frequency.setValueAtTime(1200, audioCtx.currentTime);
+    bandpass.Q.setValueAtTime(4, audioCtx.currentTime);
+    
+    const noiseGain = audioCtx.createGain();
+    noiseGain.gain.setValueAtTime(0.12, audioCtx.currentTime); // Subtle volume
+    noiseGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.07);
+    
+    noise.connect(bandpass);
+    bandpass.connect(noiseGain);
+    noiseGain.connect(audioCtx.destination);
+    
+    // 2. High-pitch mechanical spring tone
+    const osc = audioCtx.createOscillator();
+    const oscGain = audioCtx.createGain();
+    
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(1800, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(700, audioCtx.currentTime + 0.04);
+    
+    oscGain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+    oscGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.04);
+    
+    osc.connect(oscGain);
+    oscGain.connect(audioCtx.destination);
+    
+    // 3. Low-pitch hollow body closing clack (starts at 30ms)
+    const closeOsc = audioCtx.createOscillator();
+    const closeGain = audioCtx.createGain();
+    
+    closeOsc.type = "triangle";
+    closeOsc.frequency.setValueAtTime(450, audioCtx.currentTime + 0.03);
+    closeOsc.frequency.exponentialRampToValueAtTime(120, audioCtx.currentTime + 0.08);
+    
+    closeGain.gain.setValueAtTime(0, audioCtx.currentTime);
+    closeGain.gain.setValueAtTime(0.15, audioCtx.currentTime + 0.03);
+    closeGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.08);
+    
+    closeOsc.connect(closeGain);
+    closeGain.connect(audioCtx.destination);
+    
+    // Start all
+    noise.start(audioCtx.currentTime);
+    osc.start(audioCtx.currentTime);
+    closeOsc.start(audioCtx.currentTime + 0.03);
+    
+    // Stop all
+    noise.stop(audioCtx.currentTime + 0.08);
+    osc.stop(audioCtx.currentTime + 0.04);
+    closeOsc.stop(audioCtx.currentTime + 0.09);
+  } catch (err) {
+    console.log("Web Audio API not supported or interaction missing:", err);
+  }
+};
+
+// Helper to speak the given text in Indonesian using Web Speech Synthesis API
+const speakText = (text: string) => {
+  try {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel(); // Stop any pending speech
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "id-ID";
+    utterance.rate = 1.05; // Slightly rapid and natural
+    utterance.pitch = 1.0;
+    window.speechSynthesis.speak(utterance);
+  } catch (err) {
+    console.warn("Speech synthesis failed:", err);
+  }
+};
+
 export const WebcamScanner: React.FC<WebcamScannerProps> = ({
   onCapture,
   onBack,
@@ -68,6 +157,7 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const isAnalyzingRef = useRef<boolean>(false);
   
   const [permissionState, setPermissionState] = useState<"prompt" | "granted" | "denied">("prompt");
   const [errorMsg, setErrorMsg] = useState<string>("");
@@ -84,6 +174,27 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
   const [autoIsFood, setAutoIsFood] = useState<boolean>(true);
   const [isAnalyzingLive, setIsAnalyzingLive] = useState<boolean>(false);
   const [dragActive, setDragActive] = useState<boolean>(false);
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState<boolean>(true);
+  const lastSpokenFoodRef = useRef<string>("");
+
+  // Speak detected food when it changes
+  useEffect(() => {
+    if (!isVoiceEnabled) return;
+    if (
+      !autoDetectedFood ||
+      autoDetectedFood === "Belum ada objek" ||
+      autoDetectedFood === "Mengambil foto..." ||
+      autoDetectedFood === "Mengunduh sampel..." ||
+      autoDetectedFood.includes("Bidikan Simulasi")
+    ) {
+      return;
+    }
+
+    if (autoDetectedFood !== lastSpokenFoodRef.current) {
+      lastSpokenFoodRef.current = autoDetectedFood;
+      speakText(autoDetectedFood);
+    }
+  }, [autoDetectedFood, isVoiceEnabled]);
 
   const handleResetToCamera = () => {
     setActiveImage("");
@@ -91,6 +202,7 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
     setSelectedPresetName("");
     setAutoDetectedFood("Belum ada objek");
     setAutoDetectedConf(0);
+    lastSpokenFoodRef.current = "";
   };
 
   // Initialize camera
@@ -162,7 +274,7 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
 
     let isMounted = true;
     const intervalId = setInterval(async () => {
-      if (!videoRef.current || !streamRef.current || isAnalyzingLive) {
+      if (!videoRef.current || !streamRef.current || isAnalyzingRef.current) {
         return;
       }
 
@@ -172,6 +284,7 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
       }
 
       try {
+        isAnalyzingRef.current = true;
         setIsAnalyzingLive(true);
         const canvas = document.createElement("canvas");
         canvas.width = 256;
@@ -199,6 +312,7 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
       } catch (err) {
         console.warn("Background auto-classification failed:", err);
       } finally {
+        isAnalyzingRef.current = false;
         if (isMounted) {
           setIsAnalyzingLive(false);
         }
@@ -209,10 +323,11 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
       isMounted = false;
       clearInterval(intervalId);
     };
-  }, [activeMode, errorMsg, isAnalyzingLive]);
+  }, [activeMode, errorMsg]);
 
   // Helper to trigger classification for a specific base64 frame
   const classifyBase64 = async (base64: string, presetName?: string) => {
+    isAnalyzingRef.current = true;
     setIsAnalyzingLive(true);
     try {
       const res = await fetch("/api/classify", {
@@ -232,6 +347,7 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
     } catch (err) {
       console.error("Gemini automatic classification failed:", err);
     } finally {
+      isAnalyzingRef.current = false;
       setIsAnalyzingLive(false);
     }
   };
@@ -329,6 +445,9 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
 
   // Capture current viewfinder image
   const handleCapture = () => {
+    // Play subtle camera shutter click sound
+    playShutterSound();
+
     if (videoRef.current && streamRef.current && !errorMsg) {
       const video = videoRef.current;
       const canvas = document.createElement("canvas");
@@ -382,12 +501,27 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
           </div>
         </div>
 
-        {errorMsg && (
-          <div className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[9px] font-bold py-1 px-2.5 rounded-full flex items-center">
-            <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse mr-1.5"></span>
-            Scan Cerdas Aktif
-          </div>
-        )}
+        <div className="flex items-center space-x-2">
+          {/* Voice/TTS Toggle Button */}
+          <button
+            onClick={() => setIsVoiceEnabled(!isVoiceEnabled)}
+            className={`p-2 rounded-full border transition-all flex items-center justify-center cursor-pointer ${
+              isVoiceEnabled
+                ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/35 shadow-[0_0_10px_rgba(16,185,129,0.2)]"
+                : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-300"
+            }`}
+            title={isVoiceEnabled ? "Mute Suara Asisten" : "Aktifkan Suara Asisten"}
+          >
+            {isVoiceEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
+          </button>
+
+          {errorMsg && (
+            <div className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[9px] font-bold py-1 px-2.5 rounded-full flex items-center">
+              <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse mr-1.5"></span>
+              Scan Cerdas Aktif
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── VIEWPORT CONTAINER ── */}
