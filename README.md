@@ -6,7 +6,7 @@ Aplikasi Flutter cerdas yang menggunakan model **LiteRT (TensorFlow Lite)** on-d
 
 ## 🤵 INFORMASI PENGEMBANG (DEVELOPER CREDENTIALS)
 *   **Nama Pembuat:** Muhammad Aiyub (Teungku Meutuwah)
-*   **Surel / Kontak:** ceo@ovisito.com
+*   **Surel / Kontak:** ceo@ovisitp.com
 *   **Peran:** Flutter & On-Device ML Specialist
 *   **Dokumentasi Lengkap:** [README_OLD.md](./README_OLD.md) (Memuat detail arsitektur teknis dan panduan pemenuhan lengkap untuk seluruh 8 kriteria submisi Dicoding).
 

@@ -26,6 +26,8 @@ class WebcamScreen extends StatefulWidget {
   State<WebcamScreen> createState() => _WebcamScreenState();
 }
 
+enum CameraScanMode { manual, live }
+
 class _WebcamScreenState extends State<WebcamScreen> {
   CameraController? _controller;
   List<CameraDescription>? _cameras;
@@ -34,6 +36,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
   String _simulatedFoodLabel = "Sate Ayam";
   ClassificationResult? _liveResult;
   bool _isLiveDetecting = false;
+  CameraScanMode _activeMode = CameraScanMode.live; // Default ke mode live deteksi real-time
   bool _disposed = false;
   bool _isProcessingFrame = false;
   bool _showPermissionRationale = true;
@@ -86,13 +89,14 @@ class _WebcamScreenState extends State<WebcamScreen> {
 
     if (_isCameraInitialized && _controller != null && _controller!.value.isInitialized) {
       try {
-        await _controller!.startImageStream((CameraImage image) async {
+        await _controller!.startImageStream((CameraImage image) {
+          // Kunci/pemeriksaan sinkron instan untuk menghindari balapan antar frame
           if (_disposed || !_isLiveDetecting || _isCapturing || _isProcessingFrame) return;
 
           _isProcessingFrame = true;
 
           try {
-            // Ekstrak data biner dari planes ke format Map sederhana agar aman dilempar ke Isolate
+            // Ekstrak data biner dari planes ke format Map sederhana secara instan di utas utama
             final Map<String, dynamic> imageData = {
               'width': image.width,
               'height': image.height,
@@ -104,21 +108,10 @@ class _WebcamScreenState extends State<WebcamScreen> {
               }).toList(),
             };
 
-            // Jalankan pre-processing dan inferensi di Isolate
-            final res = await widget.classifierService.classifyCameraImage(imageData);
-
-            if (mounted && !_isCapturing && _isLiveDetecting) {
-              setState(() {
-                if (res != null) {
-                  _liveResult = res;
-                }
-              });
-            }
+            // Serahkan pemrosesan berat (preprocessing, konversi warna & inferensi LiteRT) ke background Isolate
+            _runInferenceInBackground(imageData);
           } catch (e) {
-            print("⚠️ Gagal memproses frame kamera real-time: $e");
-          } finally {
-            // Throttling: Berikan jeda 800ms sebelum mengizinkan pemrosesan frame berikutnya
-            await Future.delayed(const Duration(milliseconds: 800));
+            print("⚠️ Gagal mengekstrak data frame kamera: $e");
             _isProcessingFrame = false;
           }
         });
@@ -128,6 +121,28 @@ class _WebcamScreenState extends State<WebcamScreen> {
       }
     } else {
       _startSimulatorLoop();
+    }
+  }
+
+  /// Memproses inferensi di background thread Isolate asinkron agar UI tetap 60 FPS
+  Future<void> _runInferenceInBackground(Map<String, dynamic> imageData) async {
+    try {
+      // Jalankan konversi warna, resize, dan inferensi model secara terisolasi penuh
+      final res = await widget.classifierService.classifyCameraImage(imageData);
+
+      if (mounted && !_isCapturing && _isLiveDetecting) {
+        setState(() {
+          if (res != null) {
+            _liveResult = res;
+          }
+        });
+      }
+    } catch (e) {
+      print("⚠️ Gagal memproses frame kamera real-time di background: $e");
+    } finally {
+      // Throttling: Berikan jeda 800ms sebelum siap menerima frame berikutnya
+      await Future.delayed(const Duration(milliseconds: 800));
+      _isProcessingFrame = false;
     }
   }
 
@@ -273,9 +288,24 @@ class _WebcamScreenState extends State<WebcamScreen> {
     }
   }
 
-  /// Toggle live detection stream on and off
-  void _toggleLiveDetection() async {
-    if (_isLiveDetecting) {
+  /// Beralih mode kamera antara foto manual dan deteksi real-time live
+  void _switchMode(CameraScanMode mode) async {
+    if (_activeMode == mode) return;
+
+    setState(() {
+      _activeMode = mode;
+    });
+
+    if (mode == CameraScanMode.live) {
+      if (_isCameraInitialized && _controller != null && _controller!.value.isInitialized) {
+        _startLiveDetectionLoop();
+      } else {
+        setState(() {
+          _isLiveDetecting = true;
+        });
+        _startSimulatorLoop();
+      }
+    } else {
       setState(() {
         _isLiveDetecting = false;
         _liveResult = null;
@@ -286,15 +316,6 @@ class _WebcamScreenState extends State<WebcamScreen> {
         } catch (e) {
           print("⚠️ Gagal menghentikan aliran stream kamera: $e");
         }
-      }
-    } else {
-      if (_isCameraInitialized && _controller != null && _controller!.value.isInitialized) {
-        _startLiveDetectionLoop();
-      } else {
-        setState(() {
-          _isLiveDetecting = true;
-        });
-        _startSimulatorLoop();
       }
     }
   }
@@ -471,104 +492,109 @@ class _WebcamScreenState extends State<WebcamScreen> {
                     ),
                   )
                 else ...[
-                  const Text(
-                    "Posisikan makanan tepat di tengah bingkai",
-                    style: TextStyle(
-                      color: Colors.white70,
+                  // Teks Panduan Kontekstual berdasarkan Mode Aktif
+                  Text(
+                    _activeMode == CameraScanMode.live
+                        ? "Mendeteksi secara otomatis dalam bingkai kamera..."
+                        : "Posisikan hidangan lalu tekan tombol jepret di bawah",
+                    style: const TextStyle(
+                      color: Colors.white80,
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
+                      letterSpacing: 0.2,
                     ),
                   ),
                   const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      // Tombol 1: Deteksi Live (Toggle)
-                      Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          GestureDetector(
-                            onTap: _toggleLiveDetection,
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              height: 58,
-                              width: 58,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: _isLiveDetecting
-                                    ? const Color(0xFF10B981).withOpacity(0.2)
-                                    : Colors.white.withOpacity(0.08),
-                                border: Border.all(
-                                  color: _isLiveDetecting
-                                      ? const Color(0xFF10B981)
-                                      : Colors.white38,
-                                  width: 2,
-                                ),
-                                boxShadow: [
-                                  if (_isLiveDetecting)
-                                    BoxShadow(
-                                      color: const Color(0xFF10B981).withOpacity(0.3),
-                                      blurRadius: 8,
-                                      spreadRadius: 1,
-                                    ),
-                                ],
-                              ),
-                              child: Icon(
-                                _isLiveDetecting ? Icons.videocam_rounded : Icons.videocam_off_rounded,
-                                color: _isLiveDetecting ? const Color(0xFF10B981) : Colors.white,
-                                size: 26,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            _isLiveDetecting ? "Deteksi Aktif" : "Deteksi Mati",
-                            style: TextStyle(
-                              color: _isLiveDetecting ? const Color(0xFF10B981) : Colors.white60,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
+                  
+                  // 4a. Mode Switcher (Pill Segmented Control) yang Sangat Jelas & Elegan
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.55),
+                      borderRadius: BorderRadius.circular(30),
+                      border: Border.all(
+                        color: Colors.white10,
+                        width: 1,
                       ),
-                      const SizedBox(width: 48),
-                      // Tombol 2: Ambil Foto (Shutter)
-                      Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          GestureDetector(
-                            onTap: _takeSnap,
-                            child: Container(
-                              height: 84,
-                              width: 84,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white, width: 4),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _buildModeTab(
+                          mode: CameraScanMode.manual,
+                          label: "Ambil Manual",
+                          icon: Icons.photo_camera_rounded,
+                        ),
+                        _buildModeTab(
+                          mode: CameraScanMode.live,
+                          label: "Deteksi Real-Time",
+                          icon: Icons.videocam_rounded,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // 4b. Tombol Shutter Utama yang Terpusat & Menakjubkan
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      GestureDetector(
+                        onTap: _takeSnap,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 250),
+                          height: 84,
+                          width: 84,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: _activeMode == CameraScanMode.live
+                                  ? const Color(0xFF10B981)
+                                  : Colors.white,
+                              width: 4,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: (_activeMode == CameraScanMode.live
+                                        ? const Color(0xFF10B981)
+                                        : Colors.white)
+                                    .withOpacity(0.25),
+                                blurRadius: 12,
+                                spreadRadius: 2,
                               ),
-                              padding: const EdgeInsets.all(6),
-                              child: Container(
-                                decoration: const BoxDecoration(
-                                  color: Colors.white,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(
-                                  Icons.camera_alt,
-                                  color: Colors.black,
-                                  size: 32,
-                                ),
-                              ),
+                            ],
+                          ),
+                          padding: const EdgeInsets.all(6),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 250),
+                            decoration: BoxDecoration(
+                              color: _activeMode == CameraScanMode.live
+                                  ? const Color(0xFF10B981)
+                                  : Colors.white,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              _activeMode == CameraScanMode.live
+                                  ? Icons.insights_rounded
+                                  : Icons.camera_alt_rounded,
+                              color: _activeMode == CameraScanMode.live
+                                  ? Colors.white
+                                  : Colors.black,
+                              size: 32,
                             ),
                           ),
-                          const SizedBox(height: 6),
-                          const Text(
-                            "Ambil Foto",
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _activeMode == CameraScanMode.live ? "Jepret & Analisis" : "Ambil Foto",
+                        style: TextStyle(
+                          color: _activeMode == CameraScanMode.live
+                              ? const Color(0xFF10B981)
+                              : Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ],
                   ),
@@ -1023,6 +1049,56 @@ class _WebcamScreenState extends State<WebcamScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Widget pembantu untuk merender tab pilihan mode dengan transisi estetik
+  Widget _buildModeTab({
+    required CameraScanMode mode,
+    required String label,
+    required IconData icon,
+  }) {
+    final bool isActive = _activeMode == mode;
+    return GestureDetector(
+      onTap: () => _switchMode(mode),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeInOut,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: isActive ? const Color(0xFF3B82F6) : Colors.transparent,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: isActive
+              ? [
+                  BoxShadow(
+                    color: const Color(0xFF3B82F6).withOpacity(0.4),
+                    blurRadius: 8,
+                    spreadRadius: 1,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : [],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              color: isActive ? Colors.white : Colors.white60,
+              size: 16,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: isActive ? Colors.white : Colors.white70,
+                fontSize: 12,
+                fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
