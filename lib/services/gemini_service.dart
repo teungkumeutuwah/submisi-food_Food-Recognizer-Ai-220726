@@ -245,8 +245,29 @@ class GeminiService {
     String halalStatus = "Halal";
     String halalReason = "Hidangan ini terbuat dari bahan-bahan dasar berstatus halal (nabati/sereal). Tidak ada titik kritis alkohol atau gelatin babi yang dideteksi.";
     String healthAnalysis = "Hidangan ini memberikan energi yang cukup dari karbohidrat, namun disarankan dikonsumsi bersama sayuran berserat tinggi untuk menekan indeks glikemik.";
+    List<String> tips = [
+      "Kurangi asupan garam/sodium tambahan pada makanan ini.",
+      "Konsumsi buah segar seperti pepaya atau jeruk setelah menyantap makanan ini.",
+      "Imbangi dengan olahraga jalan cepat selama 20 menit setelah makan."
+    ];
 
-    if (lower.contains("sate")) {
+    if (lower.contains("bukan makanan") || lower.contains("non makanan")) {
+      calories = 0;
+      carbs = 0;
+      fat = 0;
+      fiber = 0;
+      protein = 0;
+      scientificName = "Non-alimentary Object";
+      origin = "N/A";
+      halalStatus = "Tidak Berlaku";
+      halalReason = "Objek yang dideteksi bukan merupakan produk makanan atau minuman, sehingga analisis kehalalan tidak berlaku.";
+      healthAnalysis = "Objek ini terdeteksi sebagai non-makanan. Pastikan Anda hanya memindai hidangan konsumsi untuk mendapatkan analisis nutrisi dan gizi yang valid.";
+      tips = [
+        "Hindari memindai objek non-konsumsi.",
+        "Gunakan kamera di area pencahayaan terang.",
+        "Arahkan lensa kamera fokus pada piring makanan Anda."
+      ];
+    } else if (lower.contains("sate")) {
       calories = 380; carbs = 8; fat = 22; fiber = 1; protein = 28;
       scientificName = "Gallus gallus domesticus (Ayam)";
       origin = "Madura, Jawa Timur, Indonesia";
@@ -281,12 +302,6 @@ class GeminiService {
       ),
     ];
 
-    final List<String> tips = [
-      "Kurangi asupan garam/sodium tambahan pada makanan ini.",
-      "Konsumsi buah segar seperti pepaya atau jeruk setelah menyantap makanan ini.",
-      "Imbangi dengan olahraga jalan cepat selama 20 menit setelah makan."
-    ];
-
     return ScannedFood(
       id: DateTime.now().millisecondsSinceEpoch,
       name: foodName,
@@ -305,7 +320,7 @@ class GeminiService {
       fat: fat,
       fiber: fiber,
       protein: protein,
-      hasRecipe: true,
+      hasRecipe: !lower.contains("bukan makanan") && !lower.contains("non makanan"),
       recipeTitle: "Resep $foodName Ala Chef Rumahan",
       recipeThumb: "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80",
       recipeIngredients: "Bahan utama masakan; Bawang putih secukupnya; Garam dan minyak sayur",

@@ -6,7 +6,7 @@ Aplikasi Flutter cerdas yang menggunakan model **LiteRT (TensorFlow Lite)** on-d
 
 ## 🤵 INFORMASI PENGEMBANG (DEVELOPER CREDENTIALS)
 *   **Nama Pembuat:** Muhammad Aiyub (Teungku Meutuwah)
-*   **Surel / Kontak:** ceo@ovisito.com
+*   **Surel / Kontak:** ceo@ovisitp.com
 *   **Peran:** Flutter & On-Device ML Specialist
 *   **Dokumentasi Lengkap:** [README_OLD.md](./README_OLD.md) (Memuat detail arsitektur teknis dan panduan pemenuhan lengkap untuk seluruh 8 kriteria submisi Dicoding).
 
@@ -16,10 +16,15 @@ Aplikasi Flutter cerdas yang menggunakan model **LiteRT (TensorFlow Lite)** on-d
 
 Berikut adalah daftar fitur utama dan kriteria teknis yang telah diimplementasikan secara lengkap, diuji, dan siap dikumpulkan:
 
-### 📸 1. Fitur Pengambilan & Pengolahan Gambar (Image Feed)
-- [x] **Live Camera Feed**: Kamera bawaan langsung (*real-time camera custom interface*) dengan visual overlay penunjuk arah bidikan yang presisi.
-- [x] **Image Picker**: Mengambil gambar makanan dari album galeri perangkat secara mulus.
-- [x] **Image Cropper**: Mengintegrasikan pemotongan gambar kustom untuk mengisolasi dan memfokuskan piring makanan sebelum proses klasifikasi dilakukan.
+### 📸 1. Fitur Pengambilan & Pengolahan Gambar (Image Feed) & Real-time Tracking
+- [x] **Live Camera Feed & Real-time Detector**: Kamera bawaan langsung (*real-time camera custom interface*) yang cerdas dengan visual HUD (*Heads-Up Display*) modern.
+- [x] **Identifikasi Real-time Jenis Makanan / Non-Makanan**: Sistem secara otomatis mengklasifikasikan objek yang ditargetkan langsung dari aliran kamera (*stream*). Jika mendeteksi objek non-konsumsi, sistem akan menampilkan status **Non Makanan (Bukan Makanan)** secara real-time.
+- [x] **Dynamic Bounding Box CustomPaint Canvas Overlay**: Menggambar kotak pembatas (*bounding box*) dinamis berwarna **Hijau** (untuk objek Makanan) atau **Merah** (untuk objek Non-Makanan) disertai label nama objek dan skor persentase akurasi menggunakan *CustomPainter* pada Canvas, bergerak secara organik sebelum pengguna mengambil foto.
+- [x] **Pemisahan Kontrol Ganda Kamera**:
+  - **Tombol Deteksi Live (Toggle)**: Untuk mengaktifkan/menonaktifkan deteksi objek langsung secara real-time (*on-device stream*).
+  - **Tombol Shutter (Ambil Foto)**: Tombol jepret utama untuk mengambil gambar dari frame aktif guna melanjutkan proses analisis informasi nutrisi mendalam, status kehalalan, dan resep kuliner.
+- [x] **Camera Permission Rationale Screen**: Menyajikan tampilan penjelasan (*overlay rationale*) yang estetik dan ramah pengguna sebelum memicu dialog izin kamera bawaan sistem/browser guna menjelaskan tujuan akses, fitur unggulan, serta keamanan privasi lokal.
+- [x] **Image Picker & Cropper**: Mengambil gambar dari galeri perangkat dan memotong (*crop*) citra secara kustom agar fokus pada objek piring hidangan.
 - [x] **Quick Samples**: Menyediakan 5+ gambar sampel hidangan lokal berkualitas tinggi untuk kemudahan pengujian fungsionalitas instan.
 
 ### 🧠 2. Pembelajaran Mesin On-Device (Machine Learning)
@@ -30,7 +35,7 @@ Berikut adalah daftar fitur utama dan kriteria teknis yang telah diimplementasik
 ### 📊 3. Hasil Prediksi & Analisis (Prediction Result)
 - [x] **Tampilan Foto**: Menampilkan kembali foto makanan asli yang telah dibidik atau dipilih.
 - [x] **Nama Makanan & Skor Kepercayaan**: Menyajikan nama klasifikasi makanan disertai persentase tingkat akurasi kepercayaan model LiteRT secara visual.
-- [x] **Gemini API (Nutrition)**: Memperoleh rincian data gizi makro (Kalori, Protein, Karbohidrat, Lemak, Serat) secara real-time dari Google Gemini AI dengan visualisasi grafik lingkaran yang estetik.
+- [x] **Gemini API (Nutrition)**: Memperoleh rincian data gizi makro (Kalori, Protein, Karbohidrat, Lemak, Serat) secara real-time dari Google Gemini AI dengan visualisasi grafik lingkaran yang estetik. Jika gambar yang dianalisis ditengarai sebagai Non-Makanan, Gemini AI memberikan status analisis kehalalan "Tidak Berlaku" dan tips penggunaan kamera yang benar secara kontekstual.
 - [x] **TheMealDB API (Recipe)**: Mengambil instruksi memasak langkah demi langkah yang akurat secara dinamis dari API eksternal TheMealDB.
 - [x] **Text-to-Speech (TTS)**: Tombol pemutar suara cerdas berbasis `flutter_tts` untuk membacakan resep dan informasi nutrisi secara verbal.
 - [x] **Offline Fallback**: Sistem mitigasi cerdas menggunakan basis data gizi lokal luring jika kunci API Gemini kosong atau perangkat kehilangan koneksi internet, memastikan aplikasi aman 100% dari crash.
