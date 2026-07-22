@@ -26,7 +26,6 @@ class _HomeScreenState extends State<HomeScreen> {
   final GeminiService _geminiService = GeminiService();
   
   List<ScannedFood> _history = [];
-  bool _isLoadingModel = true;
   bool _isProcessingImage = false;
 
   // Nilai Asupan Harian Target (BPOM / Kemenkes RI standar)
@@ -53,12 +52,6 @@ class _HomeScreenState extends State<HomeScreen> {
       await _classifierService.loadModel();
     } catch (e) {
       print("⚠️ Model TFLite gagal dimuat. Sistem beralih ke Mode Simulasi Cerdas (Gemini Backup).");
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoadingModel = false;
-        });
-      }
     }
   }
 
@@ -120,6 +113,553 @@ class _HomeScreenState extends State<HomeScreen> {
     _todayCarbs = carb;
     _todayProtein = prot;
     _todayFat = fat;
+  }
+
+  /// Menghitung data konsumsi harian selama 7 hari terakhir
+  List<DailyIntake> _getWeeklyIntakeData() {
+    final List<DailyIntake> data = [];
+    final now = DateTime.now();
+    
+    // Ambil 7 hari terakhir (dari 6 hari lalu sampai hari ini)
+    for (int i = 6; i >= 0; i--) {
+      final date = now.subtract(Duration(days: i));
+      double cal = 0.0;
+      double carbs = 0.0;
+      double protein = 0.0;
+      double fat = 0.0;
+      
+      for (var item in _history) {
+        final itemDate = DateTime.fromMillisecondsSinceEpoch(item.timestamp);
+        if (itemDate.year == date.year && itemDate.month == date.month && itemDate.day == date.day) {
+          cal += item.calories;
+          carbs += item.carbs;
+          protein += item.protein;
+          fat += item.fat;
+        }
+      }
+      
+      data.add(DailyIntake(
+        date: date,
+        calories: cal,
+        carbs: carbs,
+        protein: protein,
+        fat: fat,
+      ));
+    }
+    
+    return data;
+  }
+
+  /// Mendapatkan nama hari kustom bahasa Indonesia
+  String _getDayName(DateTime date) {
+    const dayNames = {
+      DateTime.monday: "Sen",
+      DateTime.tuesday: "Sel",
+      DateTime.wednesday: "Rab",
+      DateTime.thursday: "Kam",
+      DateTime.friday: "Jum",
+      DateTime.saturday: "Sab",
+      DateTime.sunday: "Min",
+    };
+    return dayNames[date.weekday] ?? "";
+  }
+
+  /// Mendapatkan saran gizi berbasis konsumsi kalori mingguan
+  String _getWeeklyIntakeFeedback(double avgCal, List<DailyIntake> data) {
+    if (avgCal == 0) {
+      return "Anda belum memindai hidangan apa pun minggu ini. Silakan pindai foto hidangan atau gunakan kamera live untuk melacak konsumsi dan asupan nutrisi mingguan Anda secara presisi!";
+    }
+    
+    if (avgCal < 1200) {
+      return "Asupan kalori mingguan Anda berada di bawah rata-rata kebutuhan harian minimum. Pastikan Anda mengonsumsi porsi makan yang cukup dengan proporsi Karbohidrat, Protein, dan Lemak yang seimbang demi menjaga metabolisme tubuh tetap optimal.";
+    } else if (avgCal > _targetCalories * 1.15) {
+      return "Asupan kalori mingguan Anda cenderung melebihi target rekomendasi harian BPOM RI (${_targetCalories.toStringAsFixed(0)} kkal). Cobalah untuk membatasi makanan tinggi lemak/minyak dan seimbangkan dengan asupan berserat seperti sayur dan buah lokal.";
+    } else {
+      return "Luar biasa! Pola makan dan asupan energi mingguan Anda sangat seimbang dan berada di rentang ideal target harian harian Anda. Pertahankan konsistensi ini untuk stamina tubuh yang prima dan kesehatan jangka panjang!";
+    }
+  }
+
+  /// Menampilkan modal rincian mingguan interaktif
+  void _showWeeklyAnalysisSheet() {
+    final weeklyData = _getWeeklyIntakeData();
+    
+    double totalCal = 0.0;
+    double maxCal = 0.0;
+    String peakDay = "Belum Ada";
+    
+    for (var d in weeklyData) {
+      totalCal += d.calories;
+      if (d.calories > maxCal) {
+        maxCal = d.calories;
+        peakDay = "${_getDayName(d.date)} (${d.date.day}/${d.date.month})";
+      }
+    }
+    
+    final avgCal = totalCal / 7;
+    
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.82,
+              decoration: const BoxDecoration(
+                color: Color(0xFF0F172A), // Premium Dark Slate Background
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(28),
+                  topRight: Radius.circular(28),
+                ),
+              ),
+              child: Stack(
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 12),
+                      Center(
+                        child: Container(
+                          width: 48,
+                          height: 5,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  "Analisis Gizi Mingguan",
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w900,
+                                    color: Colors.white,
+                                    letterSpacing: -0.2,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  "Perkembangan asupan kalori & nutrisi makro 7 hari terakhir",
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.grey[400],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            GestureDetector(
+                              onTap: () => Navigator.pop(context),
+                              child: Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.08),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.close, color: Colors.white70, size: 18),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      
+                      Expanded(
+                        child: SingleChildScrollView(
+                          physics: const BouncingScrollPhysics(),
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Container(
+                                height: 210,
+                                width: double.infinity,
+                                padding: const EdgeInsets.only(top: 16, right: 16, left: 0, bottom: 8),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: Colors.white.withOpacity(0.05),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: _buildWeeklyBarChart(weeklyData),
+                              ),
+                              const SizedBox(height: 20),
+                              
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  _buildLegendItem(const Color(0xFF3B82F6), "Karbohidrat"),
+                                  const SizedBox(width: 16),
+                                  _buildLegendItem(const Color(0xFFF97316), "Protein"),
+                                  const SizedBox(width: 16),
+                                  _buildLegendItem(const Color(0xFFEAB308), "Lemak"),
+                                ],
+                              ),
+                              const SizedBox(height: 24),
+                              
+                              const Text(
+                                "Ringkasan Nutrisi",
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _buildSummaryStatBox(
+                                      title: "Rata-rata Kalori",
+                                      value: "${avgCal.toStringAsFixed(0)} kkal",
+                                      icon: Icons.insights_rounded,
+                                      color: const Color(0xFF3B82F6),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: _buildSummaryStatBox(
+                                      title: "Total Mingguan",
+                                      value: "${totalCal.toStringAsFixed(0)} kkal",
+                                      icon: Icons.dashboard_outlined,
+                                      color: const Color(0xFF10B981),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _buildSummaryStatBox(
+                                      title: "Konsumsi Tertinggi",
+                                      value: maxCal > 0 ? "${maxCal.toStringAsFixed(0)} kkal" : "N/A",
+                                      subText: maxCal > 0 ? "Hari $peakDay" : null,
+                                      icon: Icons.trending_up_rounded,
+                                      color: const Color(0xFFF59E0B),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: _buildSummaryStatBox(
+                                      title: "Target Harian",
+                                      value: "${_targetCalories.toStringAsFixed(0)} kkal",
+                                      subText: "BPOM RI Standard",
+                                      icon: Icons.track_changes_rounded,
+                                      color: const Color(0xFFEC4899),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 24),
+                              
+                              Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.04),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: Colors.white.withOpacity(0.06),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Icon(
+                                      Icons.wb_sunny_rounded,
+                                      color: Color(0xFFEAB308),
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text(
+                                            "Rekomendasi Ahli Gizi AI",
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            _getWeeklyIntakeFeedback(avgCal, weeklyData),
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: Colors.grey[300],
+                                              height: 1.5,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 40),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// Membuat visualisasi grafik batang fl_chart untuk rincian kalori mingguan
+  Widget _buildWeeklyBarChart(List<DailyIntake> data) {
+    double maxVal = _targetCalories * 1.2;
+    for (var d in data) {
+      if (d.calories > maxVal) {
+        maxVal = d.calories;
+      }
+    }
+    maxVal = (maxVal / 500).ceil() * 500.0;
+    if (maxVal < 1000) maxVal = 2500.0;
+
+    return BarChart(
+      BarChartData(
+        alignment: BarChartAlignment.spaceAround,
+        maxY: maxVal,
+        barTouchData: BarTouchData(
+          enabled: true,
+          touchTooltipData: BarTouchTooltipData(
+            getTooltipColor: (group) => const Color(0xFF1E293B),
+            tooltipPadding: const EdgeInsets.all(10),
+            tooltipMargin: 8,
+            getTooltipItem: (group, groupIndex, rod, rodIndex) {
+              final d = data[groupIndex];
+              return BarTooltipItem(
+                "${_getDayName(d.date)}\n",
+                const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                ),
+                children: [
+                  TextSpan(
+                    text: "${d.calories.toStringAsFixed(0)} kkal\n",
+                    style: const TextStyle(
+                      color: Color(0xFF3B82F6),
+                      fontWeight: FontWeight.w900,
+                      fontSize: 13,
+                    ),
+                  ),
+                  TextSpan(
+                    text: "K: ${d.carbs.toStringAsFixed(0)}g  |  P: ${d.protein.toStringAsFixed(0)}g  |  L: ${d.fat.toStringAsFixed(0)}g",
+                    style: TextStyle(
+                      color: Colors.grey[300],
+                      fontWeight: FontWeight.normal,
+                      fontSize: 10,
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+        titlesData: FlTitlesData(
+          show: true,
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, meta) {
+                final int idx = value.toInt();
+                if (idx >= 0 && idx < data.length) {
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      _getDayName(data[idx].date),
+                      style: const TextStyle(
+                        color: Colors.white60,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  );
+                }
+                return const SizedBox();
+              },
+              reservedSize: 32,
+            ),
+          ),
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 42,
+              getTitlesWidget: (value, meta) {
+                if (value == 0) return const SizedBox();
+                return Text(
+                  "${value.toInt()}",
+                  style: const TextStyle(
+                    color: Colors.white30,
+                    fontSize: 9,
+                  ),
+                );
+              },
+            ),
+          ),
+          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        ),
+        gridData: FlGridData(
+          show: true,
+          drawVerticalLine: false,
+          getDrawingHorizontalLine: (value) {
+            return FlLine(
+              color: Colors.white.withOpacity(0.04),
+              strokeWidth: 1,
+              dashArray: [5, 5],
+            );
+          },
+        ),
+        borderData: FlBorderData(show: false),
+        barGroups: List.generate(data.length, (index) {
+          final d = data[index];
+          return BarChartGroupData(
+            x: index,
+            barRods: [
+              BarChartRodData(
+                toY: d.calories,
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF3B82F6), Color(0xFF10B981)],
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                ),
+                width: 14,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(6),
+                  topRight: Radius.circular(6),
+                ),
+                backDrawRodData: BackgroundBarChartRodData(
+                  show: true,
+                  toY: maxVal,
+                  color: Colors.white.withOpacity(0.02),
+                ),
+              ),
+            ],
+          );
+        }),
+      ),
+    );
+  }
+
+  /// Membuat box ringkasan statistik
+  Widget _buildSummaryStatBox({
+    required String title,
+    required String value,
+    String? subText,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.05),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: color, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: Colors.grey,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                  ),
+                ),
+                if (subText != null) ...[
+                  const SizedBox(height: 1),
+                  Text(
+                    subText,
+                    style: const TextStyle(
+                      fontSize: 9,
+                      color: Colors.white60,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Membuat item legenda grafik
+  Widget _buildLegendItem(Color color, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 10,
+            color: Colors.white70,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
   }
 
   /// Menambahkan item baru ke riwayat dan menyimpannya secara lokal
@@ -195,44 +735,46 @@ class _HomeScreenState extends State<HomeScreen> {
       );
 
       if (scannedFood != null) {
+        final ScannedFood baseFood = scannedFood;
+        ScannedFood finalFood = baseFood;
         // 3. Panggil MealDB API menggunakan nama makanan dari LiteRT
         try {
           final mealDbService = MealDBService();
           final mealDbRecipe = await mealDbService.fetchRecipe(detectedLabel);
           
-          scannedFood = ScannedFood(
-            id: scannedFood.id,
-            name: scannedFood.name,
-            confidence: scannedFood.confidence,
-            imagePath: scannedFood.imagePath,
-            timestamp: scannedFood.timestamp,
-            scientificName: scannedFood.scientificName,
-            origin: scannedFood.origin,
-            healthAnalysis: scannedFood.healthAnalysis,
-            healthTips: scannedFood.healthTips,
-            halalStatus: scannedFood.halalStatus,
-            halalReason: scannedFood.halalReason,
-            suggestedRestaurants: scannedFood.suggestedRestaurants,
-            calories: scannedFood.calories,
-            carbs: scannedFood.carbs,
-            fat: scannedFood.fat,
-            fiber: scannedFood.fiber,
-            protein: scannedFood.protein,
+          finalFood = ScannedFood(
+            id: baseFood.id,
+            name: baseFood.name,
+            confidence: baseFood.confidence,
+            imagePath: baseFood.imagePath,
+            timestamp: baseFood.timestamp,
+            scientificName: baseFood.scientificName,
+            origin: baseFood.origin,
+            healthAnalysis: baseFood.healthAnalysis,
+            healthTips: baseFood.healthTips,
+            halalStatus: baseFood.halalStatus,
+            halalReason: baseFood.halalReason,
+            suggestedRestaurants: baseFood.suggestedRestaurants,
+            calories: baseFood.calories,
+            carbs: baseFood.carbs,
+            fat: baseFood.fat,
+            fiber: baseFood.fiber,
+            protein: baseFood.protein,
             hasRecipe: mealDbRecipe['hasRecipe'] ?? false,
             recipeTitle: mealDbRecipe['title'] ?? detectedLabel,
             recipeThumb: mealDbRecipe['thumb'] ?? '',
             recipeIngredients: mealDbRecipe['ingredients'] ?? '',
             recipeInstructions: mealDbRecipe['instructions'] ?? '',
-            isSimulated: scannedFood.isSimulated,
-            tfliteModelLoaded: scannedFood.tfliteModelLoaded,
-            isFavorite: scannedFood.isFavorite,
+            isSimulated: baseFood.isSimulated,
+            tfliteModelLoaded: baseFood.tfliteModelLoaded,
+            isFavorite: baseFood.isFavorite,
           );
         } catch (recipeErr) {
           print("⚠️ Gagal mengambil resep dari MealDB: $recipeErr");
         }
 
         // Simpan ke riwayat lokal
-        await _saveToHistory(scannedFood);
+        await _saveToHistory(finalFood);
 
         // Arahkan langsung ke halaman hasil rincian
         if (mounted) {
@@ -240,10 +782,10 @@ class _HomeScreenState extends State<HomeScreen> {
             context,
             MaterialPageRoute(
               builder: (context) => ResultScreen(
-                food: scannedFood,
+                food: finalFood,
                 onFavoriteToggle: () {
                   setState(() {
-                    scannedFood!.isFavorite = !scannedFood!.isFavorite;
+                    finalFood.isFavorite = !finalFood.isFavorite;
                     _loadHistory();
                   });
                 },
@@ -532,6 +1074,40 @@ class _HomeScreenState extends State<HomeScreen> {
                   _targetFat, 
                   const Color(0xFFEAB308),
                 ),
+                const SizedBox(height: 14),
+                // Tombol rincian analisis konsumsi mingguan
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: _showWeeklyAnalysisSheet,
+                    icon: const Icon(
+                      Icons.bar_chart_rounded,
+                      color: Color(0xFF3B82F6),
+                      size: 16,
+                    ),
+                    label: const Text(
+                      "Analisis Mingguan",
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF3B82F6),
+                      ),
+                    ),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      backgroundColor: Colors.white.withOpacity(0.05),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                        side: BorderSide(
+                          color: Colors.white.withOpacity(0.08),
+                          width: 1,
+                        ),
+                      ),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -621,3 +1197,20 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 }
+
+class DailyIntake {
+  final DateTime date;
+  final double calories;
+  final double carbs;
+  final double protein;
+  final double fat;
+
+  DailyIntake({
+    required this.date,
+    required this.calories,
+    required this.carbs,
+    required this.protein,
+    required this.fat,
+  });
+}
+

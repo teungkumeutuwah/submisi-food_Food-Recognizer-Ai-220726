@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
@@ -10,6 +12,9 @@ import 'result_screen.dart';
 
 /// Halaman interaktif pemindaian langsung (Live Camera Viewfinder) dengan overlay
 /// pemandu bidik, shutter cerdas, dan detektor on-device ter-integrasi.
+///
+/// OPTIMISASI: Menggunakan Persistent Isolate dari ClassifierService agar
+/// Interpreter LiteRT hanya dibuat SEKALI dan dipakai ulang setiap frame.
 class WebcamScreen extends StatefulWidget {
   final ClassifierService classifierService;
   final GeminiService geminiService;
@@ -38,8 +43,12 @@ class _WebcamScreenState extends State<WebcamScreen> {
   bool _isLiveDetecting = false;
   CameraScanMode _activeMode = CameraScanMode.live; // Default ke mode live deteksi real-time
   bool _disposed = false;
-  bool _isProcessingFrame = false;
   bool _showPermissionRationale = true;
+
+  // ★ OPTIMISASI: Persistent Isolate support
+  StreamSubscription<Map<String, dynamic>>? _liveResultSubscription;
+  DateTime? _lastFrameSent;
+  static const int _frameThrottleMs = 250; // ~4 FPS (dari 800ms → 250ms)
 
   @override
   void initState() {
@@ -51,6 +60,26 @@ class _WebcamScreenState extends State<WebcamScreen> {
   /// Menginisialisasi perangkat keras kamera jika tersedia di sistem
   Future<void> _setupCamera() async {
     try {
+      // ★ 1. Mulai Persistent Isolate DAHULU sebelum kamera
+      if (widget.classifierService.isLoaded &&
+          !widget.classifierService.isLiveRunning) {
+        await widget.classifierService.startLiveIsolate();
+      }
+
+      // ★ 2. Subscribe ke stream hasil dari isolate
+      _liveResultSubscription =
+          widget.classifierService.liveResults?.listen((result) {
+        if (mounted && !_isCapturing && _isLiveDetecting) {
+          setState(() {
+            _liveResult = ClassificationResult(
+              label: result['label'] as String,
+              confidence: result['confidence'] as double,
+            );
+          });
+        }
+      });
+
+      // 3. Inisialisasi kamera hardware
       _cameras = await availableCameras();
       if (_cameras != null && _cameras!.isNotEmpty) {
         // Gunakan kamera utama (belakang) jika ada
@@ -74,15 +103,33 @@ class _WebcamScreenState extends State<WebcamScreen> {
         }
       } else {
         print("⚠️ Perangkat kamera tidak dideteksi (kemungkinan berjalan di simulator).");
-        _startLiveDetectionLoop();
+        setState(() {
+          _isLiveDetecting = true;
+          _liveResult = ClassificationResult(
+            label: _simulatedFoodLabel,
+            confidence: 0.95,
+          );
+        });
+        _startSimulatorLoop();
       }
     } catch (e) {
       print("⚠️ Kesalahan saat mendeteksi kamera: $e");
-      _startLiveDetectionLoop();
+      setState(() {
+        _isLiveDetecting = true;
+        _liveResult = ClassificationResult(
+          label: _simulatedFoodLabel,
+          confidence: 0.95,
+        );
+      });
+      _startSimulatorLoop();
     }
   }
 
-  /// Loop deteksi live berkala menggunakan CameraImage stream tanpa membebani thread UI utama
+  /// Loop deteksi live berkala menggunakan CameraImage stream.
+  ///
+  /// ★ OPTIMISASI: Frame dikirim ke Persistent Isolate via SendPort
+  /// (fire-and-forget), bukan Isolate.run() per frame.
+  /// Throttle berbasis waktu 250ms (~4 FPS) menggantikan boolean flag.
   Future<void> _startLiveDetectionLoop() async {
     if (_isLiveDetecting) return;
     _isLiveDetecting = true;
@@ -90,29 +137,35 @@ class _WebcamScreenState extends State<WebcamScreen> {
     if (_isCameraInitialized && _controller != null && _controller!.value.isInitialized) {
       try {
         await _controller!.startImageStream((CameraImage image) {
-          // Kunci/pemeriksaan sinkron instan untuk menghindari balapan antar frame
-          if (_disposed || !_isLiveDetecting || _isCapturing || _isProcessingFrame) return;
+          // Kunci/pemeriksaan instan untuk menghindari pemrosesan saat tidak diperlukan
+          if (_disposed || !_isLiveDetecting || _isCapturing) return;
 
-          _isProcessingFrame = true;
+          // ★ Time-based throttle (bukan boolean flag)
+          final now = DateTime.now();
+          if (_lastFrameSent != null &&
+              now.difference(_lastFrameSent!).inMilliseconds < _frameThrottleMs) {
+            return; // Skip frame — terlalu cepat
+          }
+          _lastFrameSent = now;
 
           try {
-            // Ekstrak data biner dari planes ke format Map sederhana secara instan di utas utama
+            // Ekstrak data biner dari planes ke format Map sederhana
             final Map<String, dynamic> imageData = {
               'width': image.width,
               'height': image.height,
               'formatGroup': image.format.group.name,
               'planes': image.planes.map((plane) => {
-                'bytes': plane.bytes,
+                // ★ Copy bytes agar aman dari buffer recycle kamera
+                'bytes': Uint8List.fromList(plane.bytes),
                 'bytesPerRow': plane.bytesPerRow,
                 'bytesPerPixel': plane.bytesPerPixel,
               }).toList(),
             };
 
-            // Serahkan pemrosesan berat (preprocessing, konversi warna & inferensi LiteRT) ke background Isolate
-            _runInferenceInBackground(imageData);
+            // ★ Kirim frame ke persistent isolate (fire-and-forget, non-blocking)
+            widget.classifierService.classifyFrame(imageData);
           } catch (e) {
             print("⚠️ Gagal mengekstrak data frame kamera: $e");
-            _isProcessingFrame = false;
           }
         });
       } catch (e) {
@@ -121,28 +174,6 @@ class _WebcamScreenState extends State<WebcamScreen> {
       }
     } else {
       _startSimulatorLoop();
-    }
-  }
-
-  /// Memproses inferensi di background thread Isolate asinkron agar UI tetap 60 FPS
-  Future<void> _runInferenceInBackground(Map<String, dynamic> imageData) async {
-    try {
-      // Jalankan konversi warna, resize, dan inferensi model secara terisolasi penuh
-      final res = await widget.classifierService.classifyCameraImage(imageData);
-
-      if (mounted && !_isCapturing && _isLiveDetecting) {
-        setState(() {
-          if (res != null) {
-            _liveResult = res;
-          }
-        });
-      }
-    } catch (e) {
-      print("⚠️ Gagal memproses frame kamera real-time di background: $e");
-    } finally {
-      // Throttling: Berikan jeda 800ms sebelum siap menerima frame berikutnya
-      await Future.delayed(const Duration(milliseconds: 800));
-      _isProcessingFrame = false;
     }
   }
 
@@ -202,7 +233,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
         print("💡 Berjalan di Simulator: Menjalankan pengambilan foto simulasi...");
         final directory = await getTemporaryDirectory();
         final dummyFile = File('${directory.path}/simulated_capture.jpg');
-        
+
         // Buat file byte kosong atau unduh gambar stock sebagai representasi
         await dummyFile.writeAsBytes([0, 1, 2, 3, 4]); // representasi byte minimal
         imagePath = dummyFile.path;
@@ -219,44 +250,46 @@ class _WebcamScreenState extends State<WebcamScreen> {
       );
 
       if (scannedFood != null) {
+        final ScannedFood baseFood = scannedFood;
+        ScannedFood finalFood = baseFood;
         // 4. Panggil MealDB API menggunakan nama makanan dari LiteRT
         try {
           final mealDbService = MealDBService();
           final mealDbRecipe = await mealDbService.fetchRecipe(label);
-          
-          scannedFood = ScannedFood(
-            id: scannedFood.id,
-            name: scannedFood.name,
-            confidence: scannedFood.confidence,
-            imagePath: scannedFood.imagePath,
-            timestamp: scannedFood.timestamp,
-            scientificName: scannedFood.scientificName,
-            origin: scannedFood.origin,
-            healthAnalysis: scannedFood.healthAnalysis,
-            healthTips: scannedFood.healthTips,
-            halalStatus: scannedFood.halalStatus,
-            halalReason: scannedFood.halalReason,
-            suggestedRestaurants: scannedFood.suggestedRestaurants,
-            calories: scannedFood.calories,
-            carbs: scannedFood.carbs,
-            fat: scannedFood.fat,
-            fiber: scannedFood.fiber,
-            protein: scannedFood.protein,
+
+          finalFood = ScannedFood(
+            id: baseFood.id,
+            name: baseFood.name,
+            confidence: baseFood.confidence,
+            imagePath: baseFood.imagePath,
+            timestamp: baseFood.timestamp,
+            scientificName: baseFood.scientificName,
+            origin: baseFood.origin,
+            healthAnalysis: baseFood.healthAnalysis,
+            healthTips: baseFood.healthTips,
+            halalStatus: baseFood.halalStatus,
+            halalReason: baseFood.halalReason,
+            suggestedRestaurants: baseFood.suggestedRestaurants,
+            calories: baseFood.calories,
+            carbs: baseFood.carbs,
+            fat: baseFood.fat,
+            fiber: baseFood.fiber,
+            protein: baseFood.protein,
             hasRecipe: mealDbRecipe['hasRecipe'] ?? false,
             recipeTitle: mealDbRecipe['title'] ?? label,
             recipeThumb: mealDbRecipe['thumb'] ?? '',
             recipeIngredients: mealDbRecipe['ingredients'] ?? '',
             recipeInstructions: mealDbRecipe['instructions'] ?? '',
-            isSimulated: scannedFood.isSimulated,
-            tfliteModelLoaded: scannedFood.tfliteModelLoaded,
-            isFavorite: scannedFood.isFavorite,
+            isSimulated: baseFood.isSimulated,
+            tfliteModelLoaded: baseFood.tfliteModelLoaded,
+            isFavorite: baseFood.isFavorite,
           );
         } catch (recipeErr) {
           print("⚠️ Gagal mengambil resep dari MealDB: $recipeErr");
         }
 
         // Simpan ke riwayat utama di HomeScreen
-        widget.onResultAnalyzed(scannedFood);
+        widget.onResultAnalyzed(finalFood);
 
         // Langsung navigasi ke halaman hasil detail
         if (mounted) {
@@ -264,10 +297,10 @@ class _WebcamScreenState extends State<WebcamScreen> {
             context,
             MaterialPageRoute(
               builder: (context) => ResultScreen(
-                food: scannedFood!,
+                food: finalFood,
                 onFavoriteToggle: () {
                   setState(() {
-                    scannedFood!.isFavorite = !scannedFood!.isFavorite;
+                    finalFood.isFavorite = !finalFood.isFavorite;
                   });
                 },
               ),
@@ -498,14 +531,14 @@ class _WebcamScreenState extends State<WebcamScreen> {
                         ? "Mendeteksi secara otomatis dalam bingkai kamera..."
                         : "Posisikan hidangan lalu tekan tombol jepret di bawah",
                     style: const TextStyle(
-                      color: Colors.white80,
+                      color: Color(0xCCFFFFFF),
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
                       letterSpacing: 0.2,
                     ),
                   ),
                   const SizedBox(height: 16),
-                  
+
                   // 4a. Mode Switcher (Pill Segmented Control) yang Sangat Jelas & Elegan
                   Container(
                     padding: const EdgeInsets.all(4),
@@ -612,7 +645,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
     final bool isNonFood = _liveResult != null &&
         (_liveResult!.label.toLowerCase() == 'bukan makanan' ||
          _liveResult!.label.toLowerCase() == 'non makanan');
-         
+
     final Color frameColor = !_isLiveDetecting
         ? const Color(0xFF64748B) // Sleek cool grey when live detection is off
         : _liveResult == null
@@ -641,7 +674,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
                   borderRadius: BorderRadius.circular(20),
                 ),
               ),
-              
+
               // Top Left Corner
               Positioned(
                 top: 0,
@@ -746,18 +779,6 @@ class _WebcamScreenState extends State<WebcamScreen> {
                           ),
                           const SizedBox(width: 8),
                         ],
-                        Icon(
-                          !_isLiveDetecting
-                              ? Icons.videocam_off_rounded
-                              : _liveResult == null
-                                  ? Icons.hourglass_empty_rounded
-                                  : isNonFood
-                                      ? Icons.block_rounded
-                                      : Icons.restaurant_menu_rounded,
-                          color: frameColor,
-                          size: 16,
-                        ),
-                        const SizedBox(width: 8),
                         Text(
                           !_isLiveDetecting
                               ? "Deteksi Dinonaktifkan"
@@ -805,7 +826,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
                 ),
               ),
               const Spacer(flex: 1),
-              
+
               // Ilustrasi Ikon Kamera Modern & Estetis
               Center(
                 child: Container(
@@ -829,7 +850,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
                 ),
               ),
               const SizedBox(height: 28),
-              
+
               // Judul Utama
               const Text(
                 "Akses Kamera Diperlukan",
@@ -842,7 +863,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              
+
               // Deskripsi Singkat Pentingnya Akses Kamera
               const Text(
                 "Untuk memulai, aplikasi membutuhkan akses ke kamera Anda. Kamera digunakan secara lokal dan aman untuk mendeteksi hidangan secara langsung (real-time).",
@@ -854,7 +875,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
                 ),
               ),
               const SizedBox(height: 32),
-              
+
               // Manfaat / Fitur Unggulan (Aman dan sesuai kaidah visual anti-slop)
               Container(
                 padding: const EdgeInsets.all(16),
@@ -891,9 +912,9 @@ class _WebcamScreenState extends State<WebcamScreen> {
                   ],
                 ),
               ),
-              
+
               const Spacer(flex: 2),
-              
+
               // Tombol Call to Action (CTA) Utama
               ElevatedButton(
                 onPressed: () {
@@ -920,7 +941,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
                 ),
               ),
               const SizedBox(height: 10),
-              
+
               TextButton(
                 onPressed: () => Navigator.pop(context),
                 style: TextButton.styleFrom(
@@ -1020,12 +1041,12 @@ class _WebcamScreenState extends State<WebcamScreen> {
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: Colors.white.withOpacity(0.2)),
             ),
-            child: DropdownButton<String>(
+            child: DropdownButton(
               value: _simulatedFoodLabel,
               dropdownColor: const Color(0xFF1E293B),
               style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
               underline: const SizedBox.shrink(),
-              items: <String>[
+              items: [
                 'Sate Ayam',
                 'Nasi Goreng',
                 'Rendang Sapi',
@@ -1034,7 +1055,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
                 'Mie Aceh',
                 'Bukan Makanan'
               ].map((String value) {
-                return DropdownMenuItem<String>(
+                return DropdownMenuItem(
                   value: value,
                   child: Text(value),
                 );
@@ -1043,6 +1064,12 @@ class _WebcamScreenState extends State<WebcamScreen> {
                 if (newValue != null) {
                   setState(() {
                     _simulatedFoodLabel = newValue;
+                    if (_isLiveDetecting) {
+                      _liveResult = ClassificationResult(
+                        label: newValue,
+                        confidence: 0.95,
+                      );
+                    }
                   });
                 }
               },
@@ -1107,7 +1134,23 @@ class _WebcamScreenState extends State<WebcamScreen> {
   void dispose() {
     _disposed = true;
     _isLiveDetecting = false;
-    _controller?.dispose();
+
+    // ★ Bersihkan stream subscription dari persistent isolate
+    _liveResultSubscription?.cancel();
+    _liveResultSubscription = null;
+
+    // Hentikan stream kamera dengan aman
+    if (_isCameraInitialized && _controller != null) {
+      try {
+        _controller!.stopImageStream();
+      } catch (_) {}
+    }
+
+    // ★ Hentikan persistent isolate dan bebaskan resource native
+    if (widget.classifierService.isLiveRunning) {
+      widget.classifierService.stopLiveIsolate();
+    }
+
     super.dispose();
   }
 }
@@ -1273,4 +1316,3 @@ class BoundingBoxPainter extends CustomPainter {
     return oldDelegate.result != result || oldDelegate.isLiveDetecting != isLiveDetecting;
   }
 }
-

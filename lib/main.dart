@@ -57,12 +57,12 @@ class FoodRecognizerApp extends StatelessWidget {
         ),
 
         // Kostumisasi style global untuk card & button
-        cardTheme: CardTheme(
+        cardTheme: CardThemeData(
           color: Colors.white,
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: Colors.grey.withOpacity(0.12), width: 1),
+            side: BorderSide(color: Colors.grey.withValues(alpha: 0.12), width: 1),
           ),
         ),
 
