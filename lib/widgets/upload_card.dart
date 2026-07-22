@@ -84,7 +84,7 @@ class _UploadCardState extends State<UploadCard> {
         border: Border.all(color: const Color(0xFFE2E8F0), width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
+            color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 15,
             offset: const Offset(0, 6),
           ),
@@ -96,7 +96,7 @@ class _UploadCardState extends State<UploadCard> {
           Container(
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
-              color: const Color(0xFF3B82F6).withOpacity(0.08),
+              color: const Color(0xFF3B82F6).withValues(alpha: 0.08),
               shape: BoxShape.circle,
             ),
             child: const Icon(

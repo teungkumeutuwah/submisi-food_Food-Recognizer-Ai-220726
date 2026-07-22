@@ -89,7 +89,7 @@ class HistoryList extends StatelessWidget {
               border: Border.all(color: const Color(0xFFE2E8F0)),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.015),
+                  color: Colors.black.withValues(alpha: 0.015),
                   blurRadius: 8,
                   offset: const Offset(0, 3),
                 ),
@@ -153,7 +153,7 @@ class HistoryList extends StatelessWidget {
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFF10B981).withOpacity(0.08),
+                                      color: const Color(0xFF10B981).withValues(alpha: 0.08),
                                       borderRadius: BorderRadius.circular(4),
                                     ),
                                     child: Text(
@@ -198,13 +198,13 @@ class HistoryList extends StatelessWidget {
     String text = status;
 
     if (status.toLowerCase().contains("non")) {
-      bg = const Color(0xFFEF4444).withOpacity(0.08);
+      bg = const Color(0xFFEF4444).withValues(alpha: 0.08);
       fg = const Color(0xFFEF4444);
     } else if (status.toLowerCase().contains("syubhah")) {
-      bg = const Color(0xFFF59E0B).withOpacity(0.08);
+      bg = const Color(0xFFF59E0B).withValues(alpha: 0.08);
       fg = const Color(0xFFF59E0B);
     } else {
-      bg = const Color(0xFF10B981).withOpacity(0.08);
+      bg = const Color(0xFF10B981).withValues(alpha: 0.08);
       fg = const Color(0xFF10B981);
       text = "Halal";
     }

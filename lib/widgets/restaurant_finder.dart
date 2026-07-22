@@ -21,9 +21,9 @@ class RestaurantFinder extends StatelessWidget {
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.amber.withOpacity(0.06),
+          color: Colors.amber.withValues(alpha: 0.06),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.amber.withOpacity(0.15), width: 1),
+          border: Border.all(color: Colors.amber.withValues(alpha: 0.15), width: 1),
         ),
         child: Row(
           children: [
@@ -82,7 +82,7 @@ class RestaurantFinder extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFEF4444).withOpacity(0.08),
+                      color: const Color(0xFFEF4444).withValues(alpha: 0.08),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(
@@ -120,7 +120,7 @@ class RestaurantFinder extends StatelessWidget {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: Colors.blue.withOpacity(0.08),
+                              color: Colors.blue.withValues(alpha: 0.08),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(

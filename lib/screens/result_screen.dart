@@ -98,7 +98,7 @@ class _ResultScreenState extends State<ResultScreen> {
             backgroundColor: const Color(0xFF0F172A),
             elevation: 0,
             leading: CircleAvatar(
-              backgroundColor: Colors.black.withOpacity(0.4),
+              backgroundColor: Colors.black.withValues(alpha: 0.4),
               child: IconButton(
                 icon: const Icon(Icons.arrow_back, color: Colors.white),
                 onPressed: () => Navigator.pop(context),
@@ -107,7 +107,7 @@ class _ResultScreenState extends State<ResultScreen> {
             actions: [
               // Favorite Button
               CircleAvatar(
-                backgroundColor: Colors.black.withOpacity(0.4),
+                backgroundColor: Colors.black.withValues(alpha: 0.4),
                 child: IconButton(
                   icon: Icon(
                     food.isFavorite ? Icons.favorite : Icons.favorite_border,
@@ -193,7 +193,7 @@ class _ResultScreenState extends State<ResultScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.08),
+                  color: Colors.blue.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: const Text(
@@ -370,8 +370,8 @@ class _ResultScreenState extends State<ResultScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               decoration: BoxDecoration(
                 color: _isPlayingTts 
-                    ? const Color(0xFFEF4444).withOpacity(0.08) 
-                    : const Color(0xFF3B82F6).withOpacity(0.08),
+                    ? const Color(0xFFEF4444).withValues(alpha: 0.08) 
+                    : const Color(0xFF3B82F6).withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: _isPlayingTts ? const Color(0xFFEF4444) : const Color(0xFF3B82F6),

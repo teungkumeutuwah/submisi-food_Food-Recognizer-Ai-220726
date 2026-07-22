@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import '../models/scanned_food.dart';
 import '../services/classifier_service.dart';
@@ -38,7 +39,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
   List<CameraDescription>? _cameras;
   bool _isCameraInitialized = false;
   bool _isCapturing = false;
-  String _simulatedFoodLabel = "Sate Ayam";
+  String _simulatedFoodLabel = "Mulai Scan...";
   ClassificationResult? _liveResult;
   bool _isLiveDetecting = false;
   CameraScanMode _activeMode = CameraScanMode.live; // Default ke mode live deteksi real-time
@@ -70,12 +71,20 @@ class _WebcamScreenState extends State<WebcamScreen> {
       _liveResultSubscription =
           widget.classifierService.liveResults?.listen((result) {
         if (mounted && !_isCapturing && _isLiveDetecting) {
+          final label = result['label'] as String;
+          final confidence = result['confidence'] as double;
           setState(() {
             _liveResult = ClassificationResult(
-              label: result['label'] as String,
-              confidence: result['confidence'] as double,
+              label: label,
+              confidence: confidence,
             );
           });
+
+          // Auto-selection/auto-trigger logic!
+          // Jika AI mengidentifikasi makanan dengan keyakinan > 90% pada KAMERA ASLI, otomatis proses.
+          if (confidence > 0.90 && label != 'Bukan Makanan' && _isCameraInitialized) {
+            _takeSnap();
+          }
         }
       });
 
@@ -184,12 +193,15 @@ class _WebcamScreenState extends State<WebcamScreen> {
       if (_disposed || !_isLiveDetecting || _isCapturing) break;
 
       if (mounted) {
+        final confidence = 0.92 + (DateTime.now().millisecond % 60) / 1000.0;
         setState(() {
           _liveResult = ClassificationResult(
             label: _simulatedFoodLabel,
-            confidence: 0.92 + (DateTime.now().millisecond % 60) / 1000.0,
+            confidence: confidence,
           );
         });
+
+        // Auto-selection/auto-trigger logic untuk Simulator dinonaktifkan agar pengguna bisa memilih gambar / preset dengan tenang.
       }
     }
   }
@@ -250,7 +262,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
       );
 
       if (scannedFood != null) {
-        final ScannedFood baseFood = scannedFood;
+        final ScannedFood baseFood = scannedFood!;
         ScannedFood finalFood = baseFood;
         // 4. Panggil MealDB API menggunakan nama makanan dari LiteRT
         try {
@@ -389,18 +401,18 @@ class _WebcamScreenState extends State<WebcamScreen> {
           // 2b. Live Detection Floating HUD Panel (On-Device)
           if (_liveResult != null && !_isCapturing)
             Positioned(
-              top: 110,
+              bottom: 230,
               left: 20,
               right: 20,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0F172A).withOpacity(0.9),
+                  color: const Color(0xFF0F172A).withValues(alpha: 0.9),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFF3B82F6).withOpacity(0.5), width: 1.5),
+                  border: Border.all(color: const Color(0xFF3B82F6).withValues(alpha: 0.5), width: 1.5),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.3),
+                      color: Colors.black.withValues(alpha: 0.3),
                       blurRadius: 10,
                       offset: const Offset(0, 4),
                     ),
@@ -462,7 +474,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF10B981).withOpacity(0.2),
+                        color: const Color(0xFF10B981).withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: const Color(0xFF10B981), width: 1),
                       ),
@@ -485,7 +497,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
             top: 44,
             left: 16,
             child: CircleAvatar(
-              backgroundColor: Colors.black.withOpacity(0.5),
+              backgroundColor: Colors.black.withValues(alpha: 0.5),
               child: IconButton(
                 icon: const Icon(Icons.arrow_back, color: Colors.white),
                 onPressed: () => Navigator.pop(context),
@@ -505,7 +517,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.7),
+                      color: Colors.black.withValues(alpha: 0.7),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Row(
@@ -543,7 +555,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
                   Container(
                     padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.55),
+                      color: Colors.black.withValues(alpha: 0.55),
                       borderRadius: BorderRadius.circular(30),
                       border: Border.all(
                         color: Colors.white10,
@@ -591,7 +603,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
                                 color: (_activeMode == CameraScanMode.live
                                         ? const Color(0xFF10B981)
                                         : Colors.white)
-                                    .withOpacity(0.25),
+                                    .withValues(alpha: 0.25),
                                 blurRadius: 12,
                                 spreadRadius: 2,
                               ),
@@ -666,9 +678,9 @@ class _WebcamScreenState extends State<WebcamScreen> {
               AnimatedContainer(
                 duration: const Duration(milliseconds: 350),
                 decoration: BoxDecoration(
-                  color: frameColor.withOpacity(0.04),
+                  color: frameColor.withValues(alpha: 0.04),
                   border: Border.all(
-                    color: frameColor.withOpacity(0.15),
+                    color: frameColor.withValues(alpha: 0.15),
                     width: 1,
                   ),
                   borderRadius: BorderRadius.circular(20),
@@ -750,15 +762,15 @@ class _WebcamScreenState extends State<WebcamScreen> {
                     duration: const Duration(milliseconds: 300),
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0F172A).withOpacity(0.95),
+                      color: const Color(0xFF0F172A).withValues(alpha: 0.95),
                       borderRadius: BorderRadius.circular(30),
                       border: Border.all(
-                        color: frameColor.withOpacity(0.7),
+                        color: frameColor.withValues(alpha: 0.7),
                         width: 1.5,
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: frameColor.withOpacity(0.2),
+                          color: frameColor.withValues(alpha: 0.2),
                           blurRadius: 10,
                           spreadRadius: 1,
                         ),
@@ -818,7 +830,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
               Align(
                 alignment: Alignment.topLeft,
                 child: CircleAvatar(
-                  backgroundColor: Colors.white.withOpacity(0.08),
+                  backgroundColor: Colors.white.withValues(alpha: 0.08),
                   child: IconButton(
                     icon: const Icon(Icons.arrow_back, color: Colors.white),
                     onPressed: () => Navigator.pop(context),
@@ -833,10 +845,10 @@ class _WebcamScreenState extends State<WebcamScreen> {
                   width: 90,
                   height: 90,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF3B82F6).withOpacity(0.12),
+                    color: const Color(0xFF3B82F6).withValues(alpha: 0.12),
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: const Color(0xFF3B82F6).withOpacity(0.3),
+                      color: const Color(0xFF3B82F6).withValues(alpha: 0.3),
                       width: 2,
                     ),
                   ),
@@ -882,7 +894,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF1E293B),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.white.withOpacity(0.06)),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
                 ),
                 child: Column(
                   children: [
@@ -976,7 +988,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: const Color(0xFF3B82F6).withOpacity(0.12),
+            color: const Color(0xFF3B82F6).withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(10),
           ),
           child: Icon(icon, color: const Color(0xFF3B82F6), size: 18),
@@ -1014,68 +1026,160 @@ class _WebcamScreenState extends State<WebcamScreen> {
   Widget _buildSimulatorFallbackView() {
     return Container(
       color: const Color(0xFF0F172A),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.videocam_off, color: Colors.grey[600], size: 64),
-          const SizedBox(height: 18),
-          const Text(
-            "Simulator Camera Feed",
-            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 6),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 40),
-            child: Text(
-              "Kamera fisik tidak tersedia. Anda dapat memilih hidangan simulasi di bawah ini untuk menguji tangkapan layar cerdas.",
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey, fontSize: 12, height: 1.4),
-            ),
-          ),
-          const SizedBox(height: 24),
-          // Dropdown selector for simulated dishes to allow easy testing
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.white.withOpacity(0.2)),
-            ),
-            child: DropdownButton(
-              value: _simulatedFoodLabel,
-              dropdownColor: const Color(0xFF1E293B),
-              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
-              underline: const SizedBox.shrink(),
-              items: [
-                'Sate Ayam',
-                'Nasi Goreng',
-                'Rendang Sapi',
-                'Bakso Sapi',
-                'Lontong Sayur',
-                'Mie Aceh',
-                'Bukan Makanan'
-              ].map((String value) {
-                return DropdownMenuItem(
-                  value: value,
-                  child: Text(value),
-                );
-              }).toList(),
-              onChanged: (newValue) {
-                if (newValue != null) {
-                  setState(() {
-                    _simulatedFoodLabel = newValue;
-                    if (_isLiveDetecting) {
-                      _liveResult = ClassificationResult(
-                        label: newValue,
-                        confidence: 0.95,
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.05),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.cloud_upload_outlined, color: Color(0xFF3B82F6), size: 48),
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                "Sistem Deteksi Otomatis",
+                style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  "Kamera fisik tidak tersedia. Anda dapat memilih sampel hidangan di bawah atau mengunggah gambar dari galeri Anda untuk dipindai secara otomatis menggunakan AI.",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey, fontSize: 12, height: 1.5),
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              // Button: Unggah dari Galeri
+              ElevatedButton.icon(
+                onPressed: () async {
+                  try {
+                    final ImagePicker picker = ImagePicker();
+                    final XFile? pickedFile = await picker.pickImage(
+                      source: ImageSource.gallery,
+                      maxWidth: 800,
+                      maxHeight: 800,
+                      imageQuality: 85,
+                    );
+                    if (pickedFile != null) {
+                      setState(() {
+                        _simulatedFoodLabel = "Menganalisis...";
+                        _isLiveDetecting = true;
+                      });
+
+                      // Jalankan klasifikasi on-device LiteRT instan
+                      String label = "Makanan Sehat";
+                      double confidence = 0.95;
+                      if (widget.classifierService.isLoaded) {
+                        final res = await widget.classifierService.classifyImage(pickedFile.path);
+                        if (res != null) {
+                          label = res.label;
+                          confidence = res.confidence;
+                        }
+                      }
+
+                      setState(() {
+                        _simulatedFoodLabel = label;
+                        _liveResult = ClassificationResult(
+                          label: label,
+                          confidence: confidence,
+                        );
+                      });
+
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text("Berhasil mendeteksi: $label (${(confidence * 100).toStringAsFixed(0)}%)"),
+                          backgroundColor: const Color(0xFF10B981),
+                          duration: const Duration(seconds: 2),
+                        ),
                       );
                     }
-                  });
-                }
-              },
-            ),
+                  } catch (e) {
+                    print("⚠️ Gagal memilih gambar dari galeri: $e");
+                  }
+                },
+                icon: const Icon(Icons.photo_library_outlined, size: 16, color: Colors.white),
+                label: const Text(
+                  "Unggah Gambar & Scan",
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF3B82F6),
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 24),
+              const Divider(color: Colors.white10),
+              const SizedBox(height: 16),
+
+              const Text(
+                "PILIH SAMPEL MAKANAN:",
+                style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.0),
+              ),
+              const SizedBox(height: 12),
+
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.center,
+                children: [
+                  'Sate Ayam',
+                  'Nasi Goreng',
+                  'Rendang Sapi',
+                  'Bakso Sapi',
+                  'Lontong Sayur',
+                  'Mie Aceh',
+                  'Bukan Makanan'
+                ].map((String value) {
+                  final bool isSelected = _simulatedFoodLabel == value;
+                  return ChoiceChip(
+                    label: Text(
+                      value,
+                      style: TextStyle(
+                        color: isSelected ? Colors.white : Colors.white70,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    selected: isSelected,
+                    selectedColor: const Color(0xFF10B981),
+                    backgroundColor: Colors.white.withValues(alpha: 0.05),
+                    checkmarkColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      side: BorderSide(
+                        color: isSelected ? Colors.transparent : Colors.white12,
+                      ),
+                    ),
+                    onSelected: (bool selected) {
+                      if (selected) {
+                        setState(() {
+                          _simulatedFoodLabel = value;
+                          if (_isLiveDetecting) {
+                            _liveResult = ClassificationResult(
+                              label: value,
+                              confidence: 0.95,
+                            );
+                          }
+                        });
+                      }
+                    },
+                  );
+                }).toList(),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -1099,7 +1203,7 @@ class _WebcamScreenState extends State<WebcamScreen> {
           boxShadow: isActive
               ? [
                   BoxShadow(
-                    color: const Color(0xFF3B82F6).withOpacity(0.4),
+                    color: const Color(0xFF3B82F6).withValues(alpha: 0.4),
                     blurRadius: 8,
                     spreadRadius: 1,
                     offset: const Offset(0, 2),
@@ -1191,10 +1295,10 @@ class _PulsingDotState extends State<_PulsingDot> with SingleTickerProviderState
           height: 10,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: const Color(0xFF10B981).withOpacity(_controller.value * 0.7 + 0.3),
+            color: const Color(0xFF10B981).withValues(alpha: _controller.value * 0.7 + 0.3),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFF10B981).withOpacity(_controller.value * 0.5),
+                color: const Color(0xFF10B981).withValues(alpha: _controller.value * 0.5),
                 blurRadius: 6,
                 spreadRadius: 2,
               ),
@@ -1245,13 +1349,13 @@ class BoundingBoxPainter extends CustomPainter {
 
     // 1. Gambar latar belakang semi-transparan tipis di dalam kotak deteksi
     final Paint fillPaint = Paint()
-      ..color = color.withOpacity(0.05)
+      ..color = color.withValues(alpha: 0.05)
       ..style = PaintingStyle.fill;
     canvas.drawRRect(rrect, fillPaint);
 
     // 2. Gambar garis tepi kotak luar pembatas tipis
     final Paint borderPaint = Paint()
-      ..color = color.withOpacity(0.5)
+      ..color = color.withValues(alpha: 0.5)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.8;
     canvas.drawRRect(rrect, borderPaint);

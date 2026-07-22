@@ -1,42 +1,64 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Camera, Sparkles, AlertCircle } from "lucide-react";
+import { ArrowLeft, Camera, Sparkles, AlertCircle, Upload, Image as ImageIcon } from "lucide-react";
 
 interface WebcamScannerProps {
   onCapture: (base64Image: string) => void;
   onBack: () => void;
 }
 
-const SIMULATED_FOOD_DATA: Record<string, { base64Mock: string; confidence: number; isFood: boolean }> = {
-  "Sate Ayam": {
-    confidence: 0.94,
+const PRESET_SAMPLES = [
+  {
+    name: "Sate Ayam",
+    url: "https://images.unsplash.com/photo-1529042410759-befb1204b468?auto=format&fit=crop&w=400&q=80",
     isFood: true,
-    base64Mock: "https://images.unsplash.com/photo-1529042410759-befb1204b468?auto=format&fit=crop&w=400&q=80",
   },
-  "Nasi Goreng": {
-    confidence: 0.97,
+  {
+    name: "Nasi Goreng",
+    url: "https://images.unsplash.com/photo-1512058564366-18510be2db19?auto=format&fit=crop&w=400&q=80",
     isFood: true,
-    base64Mock: "https://images.unsplash.com/photo-1512058564366-18510be2db19?auto=format&fit=crop&w=400&q=80",
   },
-  "Rendang Sapi": {
-    confidence: 0.96,
+  {
+    name: "Rendang Sapi",
+    url: "https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=400&q=80",
     isFood: true,
-    base64Mock: "https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=400&q=80",
   },
-  "Soto Ayam": {
-    confidence: 0.92,
+  {
+    name: "Mie Aceh",
+    url: "https://images.unsplash.com/photo-1574894709920-11b28e7367e3?auto=format&fit=crop&w=400&q=80",
     isFood: true,
-    base64Mock: "https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=400&q=80",
   },
-  "Mie Aceh": {
-    confidence: 0.95,
+  {
+    name: "Kopi Susu",
+    url: "https://images.unsplash.com/photo-1507133750040-4a8f57021571?auto=format&fit=crop&w=400&q=80",
     isFood: true,
-    base64Mock: "https://images.unsplash.com/photo-1574894709920-11b28e7367e3?auto=format&fit=crop&w=400&q=80",
   },
-  "Bukan Makanan": {
-    confidence: 0.99,
+  {
+    name: "Laptop",
+    url: "https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=400&q=80",
     isFood: false,
-    base64Mock: "https://images.unsplash.com/photo-1502602898657-3e91760cbb34?auto=format&fit=crop&w=400&q=80",
-  },
+  }
+];
+
+// Helper to convert an image URL to Base64 using canvas
+const imageUrlToBase64 = (url: string): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.min(img.width, 512);
+      canvas.height = Math.min(img.height, 512);
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.8));
+      } else {
+        reject(new Error("Failed to get canvas 2D context"));
+      }
+    };
+    img.onerror = (e) => reject(e);
+    img.src = url;
+  });
 };
 
 export const WebcamScanner: React.FC<WebcamScannerProps> = ({
@@ -45,19 +67,33 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  
   const [permissionState, setPermissionState] = useState<"prompt" | "granted" | "denied">("prompt");
   const [errorMsg, setErrorMsg] = useState<string>("");
-  
-  // Fitur Segmented Control Mode seperti Flutter (live vs manual)
   const [activeMode, setActiveMode] = useState<"live" | "shutter">("live");
-  const [simulatedFood, setSimulatedFood] = useState<string>("Sate Ayam");
-  const [liveConf, setLiveConf] = useState<number>(0.94);
+  
+  // Scanned / Loaded image state (for simulator/upload mode - initialized empty for a clean state)
+  const [activeImage, setActiveImage] = useState<string>("");
+  const [activeImageBase64, setActiveImageBase64] = useState<string>("");
+  const [selectedPresetName, setSelectedPresetName] = useState<string>("");
 
-  const [autoDetectedFood, setAutoDetectedFood] = useState<string>("");
+  // Automatic recognition states
+  const [autoDetectedFood, setAutoDetectedFood] = useState<string>("Belum ada objek");
   const [autoDetectedConf, setAutoDetectedConf] = useState<number>(0);
   const [autoIsFood, setAutoIsFood] = useState<boolean>(true);
   const [isAnalyzingLive, setIsAnalyzingLive] = useState<boolean>(false);
+  const [dragActive, setDragActive] = useState<boolean>(false);
 
+  const handleResetToCamera = () => {
+    setActiveImage("");
+    setActiveImageBase64("");
+    setSelectedPresetName("");
+    setAutoDetectedFood("Belum ada objek");
+    setAutoDetectedConf(0);
+  };
+
+  // Initialize camera
   const startCamera = async () => {
     try {
       setErrorMsg("");
@@ -74,10 +110,9 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
       streamRef.current = stream;
       setPermissionState("granted");
     } catch (err: any) {
-      console.warn("Camera access failed, fallback to interactive simulator:", err);
-      // Demi kenyamanan pengujian di browser preview AI Studio, fallback otomatis ke "granted" dengan preview visual simulasi interaktif
+      console.warn("Camera access blocked or not found. Entering elegant automatic simulation mode.", err);
       setPermissionState("granted");
-      setErrorMsg("Berjalan dalam Mode Simulator (Webcam tidak terdeteksi atau diblokir browser)");
+      setErrorMsg("Kamera fisik tidak tersedia. Gunakan uploader atau pilih sampel objek untuk dipindai otomatis oleh Gemini AI.");
     }
   };
 
@@ -91,26 +126,36 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
     };
   }, []);
 
-  // Pasangkan stream ke elemen video setelah komponen di-render dan elemen video tersedia
+  // Assign stream to video element
   useEffect(() => {
-    if (permissionState === "granted" && streamRef.current && videoRef.current) {
+    if (permissionState === "granted" && streamRef.current && videoRef.current && !errorMsg) {
       videoRef.current.srcObject = streamRef.current;
     }
-  }, [permissionState]);
+  }, [permissionState, errorMsg]);
 
-  // Update real-time confidence float subtle animation
+  // Real-Time Simulator Fluctuation Loop to make the simulator feel "live" and identical to a device
   useEffect(() => {
-    const timer = setInterval(() => {
-      const baseConf = SIMULATED_FOOD_DATA[simulatedFood]?.confidence || 0.95;
-      const variation = (Math.sin(Date.now() / 600) * 0.015);
-      setLiveConf(Math.min(1.0, Math.max(0.7, baseConf + variation)));
-    }, 300);
-    return () => clearInterval(timer);
-  }, [simulatedFood]);
+    if (activeMode !== "live" || !errorMsg || !activeImage) {
+      return;
+    }
 
-  // Real-Time Automatic Object Detection Loop using Gemini API
+    const intervalId = setInterval(() => {
+      if (isAnalyzingLive || !autoDetectedFood || autoDetectedFood.includes("...")) {
+        return;
+      }
+      // Fluctuate confidence score slightly to mimic a real-time active tracking scan
+      setAutoDetectedConf((prev) => {
+        const delta = (Math.random() * 0.04) - 0.02;
+        const next = Math.max(0.85, Math.min(0.99, (prev || 0.95) + delta));
+        return parseFloat(next.toFixed(3));
+      });
+    }, 2000);
+
+    return () => clearInterval(intervalId);
+  }, [activeMode, errorMsg, activeImage, isAnalyzingLive, autoDetectedFood]);
+
+  // Real-Time Camera Classification Loop (only if camera is active and no errorMsg)
   useEffect(() => {
-    // Only run if activeMode is 'live' and we have a working camera stream (no errorMsg)
     if (activeMode !== "live" || !!errorMsg) {
       return;
     }
@@ -122,7 +167,6 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
       }
 
       const video = videoRef.current;
-      // Skip if video is not ready
       if (video.readyState < 2) {
         return;
       }
@@ -130,7 +174,6 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
       try {
         setIsAnalyzingLive(true);
         const canvas = document.createElement("canvas");
-        // Keep classification frame size small for rapid network transmission
         canvas.width = 256;
         canvas.height = 256;
         const ctx = canvas.getContext("2d");
@@ -140,9 +183,7 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
 
           const res = await fetch("/api/classify", {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ image: base64Frame }),
           });
 
@@ -162,7 +203,7 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
           setIsAnalyzingLive(false);
         }
       }
-    }, 3500); // scan every 3.5 seconds
+    }, 3500);
 
     return () => {
       isMounted = false;
@@ -170,8 +211,124 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
     };
   }, [activeMode, errorMsg, isAnalyzingLive]);
 
+  // Helper to trigger classification for a specific base64 frame
+  const classifyBase64 = async (base64: string, presetName?: string) => {
+    setIsAnalyzingLive(true);
+    try {
+      const res = await fetch("/api/classify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: base64, presetName }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.name) {
+          setAutoDetectedFood(data.name);
+          setAutoDetectedConf(data.confidence);
+          setAutoIsFood(data.isFood !== undefined ? data.isFood : true);
+        }
+      }
+    } catch (err) {
+      console.error("Gemini automatic classification failed:", err);
+    } finally {
+      setIsAnalyzingLive(false);
+    }
+  };
+
+  // Convert and classify Unsplash Preset
+  const loadAndClassifyPreset = async (name: string, url: string) => {
+    setSelectedPresetName(name);
+    setActiveImage(url);
+    
+    if (activeMode !== "live") {
+      // Manual Mode: Just load image and show ready status without automatic analysis!
+      setAutoDetectedFood(`Bidikan Simulasi (${name})`);
+      setAutoDetectedConf(0);
+      setAutoIsFood(name !== "Laptop");
+      try {
+        const base64 = await imageUrlToBase64(url);
+        setActiveImageBase64(base64);
+      } catch (err) {
+        console.log("Failed to preload preset base64:", err);
+      }
+      return;
+    }
+
+    setIsAnalyzingLive(true);
+    setAutoDetectedFood("Mengunduh sampel...");
+    
+    try {
+      const base64 = await imageUrlToBase64(url);
+      setActiveImageBase64(base64);
+      setAutoDetectedFood("Menganalisis objek...");
+      await classifyBase64(base64, name);
+    } catch (err) {
+      console.log("Failed to load preset image:", err);
+      // Fallback in case of network issues
+      setAutoDetectedFood(name);
+      setAutoDetectedConf(0.95);
+      setAutoIsFood(name !== "Laptop");
+      setIsAnalyzingLive(false);
+    }
+  };
+
+  // Handle uploaded/dragged files
+  const handleFileProcess = (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      alert("Harap pilih file gambar saja!");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const base64 = e.target?.result as string;
+      setActiveImage(base64);
+      setActiveImageBase64(base64);
+      setSelectedPresetName("");
+      
+      if (activeMode !== "live") {
+        // Manual Mode: Do not trigger automatic classification!
+        setAutoDetectedFood("Gambar Terunggah (Siap Jepret)");
+        setAutoDetectedConf(0);
+        setAutoIsFood(true);
+        return;
+      }
+
+      setAutoDetectedFood("Membaca gambar...");
+      await classifyBase64(base64);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Drag and drop event handlers
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleFileProcess(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      handleFileProcess(e.target.files[0]);
+    }
+  };
+
+  // Capture current viewfinder image
   const handleCapture = () => {
-    // Jika kamera hardware aktif, ambil gambar frame nyata dari video stream
     if (videoRef.current && streamRef.current && !errorMsg) {
       const video = videoRef.current;
       const canvas = document.createElement("canvas");
@@ -183,27 +340,34 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
         onCapture(dataUrl);
-        return;
+      }
+    } else {
+      // In simulator/upload mode, use the current base64 image
+      if (activeImageBase64) {
+        onCapture(activeImageBase64);
+      } else {
+        // Fallback to active image URL if base64 not yet generated
+        imageUrlToBase64(activeImage)
+          .then((b64) => onCapture(b64))
+          .catch(() => onCapture(activeImage));
       }
     }
-
-    // Fallback: gunakan mock image berbasis dropdown simulasi agar proses scan API bekerja tanpa kamera fisik
-    const foodConfig = SIMULATED_FOOD_DATA[simulatedFood];
-    if (foodConfig) {
-      // Mengubah URL gambar mockup menjadi dataUrl atau melemparkan string langsung yang didukung app.tsx
-      onCapture(foodConfig.base64Mock);
-    }
   };
-
-  const isNonFood = errorMsg 
-    ? simulatedFood === "Bukan Makanan" 
-    : (autoDetectedFood ? !autoIsFood : false);
 
   return (
     <div className="fixed inset-0 bg-slate-950 flex flex-col z-50 overflow-hidden text-white font-sans">
       
+      {/* Hidden File Input accessible anywhere */}
+      <input 
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        accept="image/*"
+        className="hidden"
+      />
+
       {/* ── TOP HEADER ── */}
-      <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-slate-950/80 via-slate-950/50 to-transparent flex items-center justify-between z-10">
+      <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-slate-950/90 via-slate-950/40 to-transparent flex items-center justify-between z-20">
         <div className="flex items-center">
           <button
             onClick={onBack}
@@ -214,25 +378,24 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
           </button>
           <div>
             <h1 className="text-white font-black text-sm tracking-tight">Kamera Deteksi Cerdas</h1>
-            <p className="text-[10px] text-slate-300">Detektor on-device ter-integrasi</p>
+            <p className="text-[10px] text-slate-300">Sistem AI Penganalisis Objek & Gizi</p>
           </div>
         </div>
 
-        {/* Status Indikator Mode Simulator */}
         {errorMsg && (
-          <div className="bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-bold py-1 px-2.5 rounded-full flex items-center">
-            <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-pulse mr-1.5"></span>
-            Simulasi Aktif
+          <div className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[9px] font-bold py-1 px-2.5 rounded-full flex items-center">
+            <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse mr-1.5"></span>
+            Scan Cerdas Aktif
           </div>
         )}
       </div>
 
       {/* ── VIEWPORT CONTAINER ── */}
-      {permissionState === "granted" && (
-        <div className="relative flex-1 flex items-center justify-center bg-black">
-          
-          {/* Real Live Video Feed atau Visual Mockup Simulator */}
-          {(!errorMsg) ? (
+      <div className="relative flex-grow flex items-center justify-center bg-black overflow-hidden mt-14 mb-[280px]">
+        
+        {/* Real Live Video Feed */}
+        {!errorMsg ? (
+          <div className="relative w-full h-full">
             <video
               ref={(el) => {
                 videoRef.current = el;
@@ -245,183 +408,314 @@ export const WebcamScanner: React.FC<WebcamScannerProps> = ({
               muted
               className="w-full h-full object-cover"
             />
-          ) : (
-            // Visual Simulator Elegan jika webcam terblokir di browser preview
-            <div className="absolute inset-0 bg-slate-900 flex flex-col items-center justify-center p-6 text-center select-none">
-              <div 
-                className="absolute inset-0 bg-cover bg-center opacity-30 blur-xs transition-all duration-500"
-                style={{ backgroundImage: `url('${SIMULATED_FOOD_DATA[simulatedFood]?.base64Mock}')` }}
-              />
-              <div className="relative z-10 max-w-sm mt-8">
-                <div className="w-16 h-16 bg-sky-500/10 border border-sky-400/20 text-sky-400 rounded-2xl flex items-center justify-center mx-auto mb-4 animate-bounce">
-                  <Camera size={28} />
-                </div>
-                <p className="text-xs text-slate-300 leading-relaxed px-4">
-                  Menggunakan visual simulasi untuk browser. Gunakan kontrol dropdown di bawah untuk beralih target deteksi secara real-time.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Efek Garis Pemindai (Scanline Laser) yang bergerak pada mode Live */}
-          {activeMode === "live" && (
-            <div className="absolute left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-sky-400 to-transparent shadow-[0_0_8px_rgba(56,189,248,0.8)] animate-pulse" 
-                 style={{
-                   animationDuration: '2.2s',
-                   top: '40%',
-                   animation: 'scanEffect 4s ease-in-out infinite'
-                 }}
-            />
-          )}
-
-          {/* ── RETICLE OVERLAY (Sleek Anti-Slop Visual Reticle) ── */}
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className={`w-[260px] h-[260px] border-2 rounded-[28px] relative flex items-center justify-center transition-colors duration-300 ${
-              activeMode !== "live" 
-                ? "border-white/30" 
-                : isNonFood 
-                  ? "border-red-500/80 shadow-[0_0_12px_rgba(239,68,68,0.2)]" 
-                  : "border-emerald-500/80 shadow-[0_0_12px_rgba(16,185,129,0.2)]"
-            }`}>
-              {/* Corner brackets */}
-              <div className={`absolute top-4 left-4 w-5 h-5 border-t-3 border-l-3 transition-colors ${activeMode === 'live' ? (isNonFood ? 'border-red-400' : 'border-emerald-400') : 'border-white/50'}`}></div>
-              <div className={`absolute top-4 right-4 w-5 h-5 border-t-3 border-r-3 transition-colors ${activeMode === 'live' ? (isNonFood ? 'border-red-400' : 'border-emerald-400') : 'border-white/50'}`}></div>
-              <div className={`absolute bottom-4 left-4 w-5 h-5 border-b-3 border-l-3 transition-colors ${activeMode === 'live' ? (isNonFood ? 'border-red-400' : 'border-emerald-400') : 'border-white/50'}`}></div>
-              <div className={`absolute bottom-4 right-4 w-5 h-5 border-b-3 border-r-3 transition-colors ${activeMode === 'live' ? (isNonFood ? 'border-red-400' : 'border-emerald-400') : 'border-white/50'}`}></div>
-
-              {/* Pulsing Dot */}
-              {activeMode === "live" && (
-                <div className={`w-3 h-3 rounded-full absolute transition-colors ${isNonFood ? 'bg-red-400' : 'bg-emerald-400'} animate-ping opacity-75`} />
-              )}
-            </div>
-          </div>
-
-          {/* ── LIVE INTERACTIVE DETECTION PANEL (Real-Time AI Overlay) ── */}
-          {activeMode === "live" && (
-            <div className="absolute top-20 left-1/2 -translate-x-1/2 w-[90%] max-w-xs pointer-events-auto z-20">
-              <div className="bg-slate-900/95 backdrop-blur-md border border-slate-800 p-3.5 rounded-2xl flex items-center justify-between shadow-2xl transition-all">
-                <div className="flex items-center space-x-3 min-w-0 flex-1">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isNonFood ? "bg-red-500/10 text-red-400" : "bg-emerald-500/10 text-emerald-400"}`}>
-                    {isAnalyzingLive ? (
-                      <div className={`w-5 h-5 border-2 ${isNonFood ? 'border-red-400' : 'border-emerald-400'} border-t-transparent rounded-full animate-spin`} />
-                    ) : isNonFood ? (
-                      <AlertCircle size={20} />
-                    ) : (
-                      <Sparkles size={18} className="animate-pulse" />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold block">
-                      {isAnalyzingLive ? "Menganalisis..." : "Terdeteksi (Real-time)"}
-                    </span>
-                    <h3 className="text-sm font-black text-white truncate">
-                      {errorMsg ? simulatedFood : (autoDetectedFood || "Mengarahkan kamera...")}
-                    </h3>
-                  </div>
-                </div>
-                <div className="text-right shrink-0 pl-3">
-                  <span className={`text-xs font-black ${isNonFood ? "text-red-400" : "text-emerald-400"}`}>
-                    {errorMsg 
-                      ? (liveConf * 100).toFixed(1) 
-                      : autoDetectedConf > 0 
-                        ? (autoDetectedConf * 100).toFixed(1) 
-                        : "0.0"}%
-                  </span>
-                  <p className="text-[8px] text-slate-400">akurasi</p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── CONTROL DASHBOARD (SWITCHER & TRIGGER BUTTONS) ── */}
-          <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-slate-950 via-slate-950/90 to-transparent flex flex-col items-center z-10">
-            
-            {/* 1. Mode Switcher (Pill Segmented Control) */}
-            <div className="bg-slate-900 border border-slate-800/80 p-0.5 rounded-full flex items-center mb-5 max-w-xs w-full">
-              <button
-                onClick={() => setActiveMode("live")}
-                className={`flex-1 py-1.5 px-3 text-xs font-black rounded-full transition-all flex items-center justify-center space-x-1.5 ${
-                  activeMode === "live"
-                    ? "bg-sky-500 text-white shadow-md shadow-sky-500/20"
-                    : "text-slate-400 hover:text-white"
-                }`}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${activeMode === 'live' ? 'bg-white' : 'bg-slate-400'} animate-pulse`}></span>
-                <span>Live Deteksi</span>
-              </button>
-              <button
-                onClick={() => setActiveMode("shutter")}
-                className={`flex-1 py-1.5 px-3 text-xs font-black rounded-full transition-all flex items-center justify-center space-x-1.5 ${
-                  activeMode === "shutter"
-                    ? "bg-sky-500 text-white shadow-md shadow-sky-500/20"
-                    : "text-slate-400 hover:text-white"
-                }`}
-              >
-                <Camera size={13} />
-                <span>Shutter Manual</span>
-              </button>
-            </div>
-
-            {/* 2. Live Simulator Dropdown - agar interaktif langsung di browser preview */}
-            {activeMode === "live" && (
-              <div className="w-full max-w-xs bg-slate-900/60 border border-slate-800/60 rounded-xl px-3 py-1.5 mb-5 flex items-center justify-between">
-                <span className="text-[10px] text-slate-300 font-bold">Simulasi Hidangan:</span>
-                <select
-                  value={simulatedFood}
-                  onChange={(e) => setSimulatedFood(e.target.value)}
-                  className="bg-transparent border-none text-[11px] font-black text-sky-400 focus:outline-none cursor-pointer"
+            {/* If activeImage is chosen/uploaded as an overlay */}
+            {activeImage && (
+              <div className="absolute inset-0 bg-slate-950 z-10 flex items-center justify-center">
+                <img src={activeImage} className="w-full h-full object-cover" alt="Selected Preview" referrerPolicy="no-referrer" />
+                <button
+                  onClick={handleResetToCamera}
+                  className="absolute top-4 right-4 bg-black/70 hover:bg-black/90 text-white rounded-full px-3 py-1.5 flex items-center justify-center transition-colors border border-white/20 shadow-lg cursor-pointer"
                 >
-                  {Object.keys(SIMULATED_FOOD_DATA).map((food) => (
-                    <option key={food} value={food} className="bg-slate-900 text-white font-medium">
-                      {food}
-                    </option>
-                  ))}
-                </select>
+                  <Camera size={14} className="mr-1.5" />
+                  <span className="text-[10px] font-black">Kembali ke Kamera</span>
+                </button>
               </div>
             )}
+          </div>
+        ) : (
+          // Visual Simulator dengan Uploader & Dropzone Area
+          <div 
+            className={`absolute inset-0 bg-slate-900 transition-all duration-300 flex flex-col items-center justify-center p-6 text-center select-none ${
+              dragActive ? "bg-sky-950/90 border-4 border-dashed border-sky-400" : ""
+            }`}
+            onDragEnter={handleDrag}
+            onDragOver={handleDrag}
+            onDragLeave={handleDrag}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {activeImage ? (
+              <div 
+                className="absolute inset-0 bg-cover bg-center opacity-80 transition-all duration-500"
+                style={{ backgroundImage: `url('${activeImage}')` }}
+              />
+            ) : (
+              <div className="relative z-10 max-w-sm">
+                <div className="w-14 h-14 bg-emerald-500/10 border border-emerald-400/30 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-[0_0_15px_rgba(16,185,129,0.15)] animate-bounce">
+                  <Upload size={24} />
+                </div>
+                <h4 className="text-xs font-extrabold text-white mb-1">
+                  Pilih Sampel Objek / Klik untuk Unggah Foto
+                </h4>
+                <p className="text-[10px] text-slate-400 leading-relaxed px-4 max-w-xs mx-auto">
+                  Ketuk salah satu pilihan sampel di bagian bawah, atau unggah foto dari galeri Anda untuk disimulasikan secara instan.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
-            {/* 3. Action Button Trigger */}
-            <div className="w-full flex justify-center items-center">
-              {activeMode === "live" ? (
-                // Tombol Konfirmasi Cepat untuk mode Live
-                <button
-                  onClick={handleCapture}
-                  className="w-full max-w-xs py-3.5 bg-sky-500 hover:bg-sky-600 text-white font-black text-xs rounded-xl transition-all shadow-lg active:scale-98 flex items-center justify-center space-x-2"
-                >
-                  <Sparkles size={16} />
-                  <span>Ambil & Analisis "{errorMsg ? simulatedFood : (autoDetectedFood || "Hidangan")}"</span>
-                </button>
-              ) : (
-                // Tombol Ambil Foto Shutter manual tradisional
-                <button
-                  onClick={handleCapture}
-                  className="w-20 h-20 bg-white border-4 border-white/45 rounded-full p-1 flex items-center justify-center shadow-lg active:scale-95 transition-transform"
-                  title="Ambil Foto"
-                >
-                  <div className="w-full h-full bg-white rounded-full flex items-center justify-center hover:bg-slate-100 transition-colors">
-                    <Camera size={34} className="text-slate-900" />
-                  </div>
-                </button>
-              )}
-            </div>
+        {/* Efek Garis Pemindai (Scanline Laser) - Hanya tampil jika mode Live aktif */}
+        {activeMode === "live" && activeImage !== "" && (
+          <div className="absolute left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_10px_rgba(16,185,129,0.8)] pointer-events-none z-10" 
+               style={{
+                 animation: 'scanEffect 3s ease-in-out infinite'
+               }}
+          />
+        )}
 
-            {/* Penjelasan Pendukung di bawah tombol */}
-            <p className="text-[9px] text-slate-400 text-center mt-4 max-w-xs leading-relaxed">
-              {activeMode === "live"
-                ? "Teknologi deteksi pintar mendeteksi secara konstan tanpa tombol rana. Ketuk Ambil & Analisis untuk rincian nutrisi."
-                : "Arahkan hidangan, pastikan cahaya cukup, lalu tekan tombol shutter putih untuk memotret."}
-            </p>
+        {/* ── RETICLE OVERLAY (Sleek Visual Reticle) ── */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+          <div className={`w-[240px] h-[240px] border rounded-[32px] relative flex items-center justify-center transition-all duration-300 ${
+            activeMode === "shutter"
+              ? "border-white/40 shadow-[0_0_15px_rgba(255,255,255,0.05)] border-dashed"
+              : isAnalyzingLive 
+                ? "border-sky-500/80 shadow-[0_0_15px_rgba(56,189,248,0.3)] border-2" 
+                : !autoIsFood && autoDetectedFood !== "Mengambil foto..." && autoDetectedFood !== "Belum ada objek"
+                  ? "border-amber-500/80 shadow-[0_0_15px_rgba(245,158,11,0.3)] border-2" 
+                  : "border-emerald-500/80 shadow-[0_0_15px_rgba(16,185,129,0.3)] border-2"
+          }`}>
+            {/* Corner brackets */}
+            <div className={`absolute top-4 left-4 w-5 h-5 border-t-2 border-l-2 transition-colors ${activeMode === 'shutter' ? 'border-white/60' : isAnalyzingLive ? 'border-sky-400' : (!autoIsFood && autoDetectedFood !== "Belum ada objek" ? 'border-amber-400' : 'border-emerald-400')}`}></div>
+            <div className={`absolute top-4 right-4 w-5 h-5 border-t-2 border-r-2 transition-colors ${activeMode === 'shutter' ? 'border-white/60' : isAnalyzingLive ? 'border-sky-400' : (!autoIsFood && autoDetectedFood !== "Belum ada objek" ? 'border-amber-400' : 'border-emerald-400')}`}></div>
+            <div className={`absolute bottom-4 left-4 w-5 h-5 border-b-2 border-l-2 transition-colors ${activeMode === 'shutter' ? 'border-white/60' : isAnalyzingLive ? 'border-sky-400' : (!autoIsFood && autoDetectedFood !== "Belum ada objek" ? 'border-amber-400' : 'border-emerald-400')}`}></div>
+            <div className={`absolute bottom-4 right-4 w-5 h-5 border-b-2 border-r-2 transition-colors ${activeMode === 'shutter' ? 'border-white/60' : isAnalyzingLive ? 'border-sky-400' : (!autoIsFood && autoDetectedFood !== "Belum ada objek" ? 'border-amber-400' : 'border-emerald-400')}`}></div>
 
+            {/* Pulsing Dot */}
+            {activeMode === "live" && activeImage !== "" && (
+              <div className={`w-3 h-3 rounded-full absolute transition-colors ${isAnalyzingLive ? 'bg-sky-400' : (!autoIsFood ? 'bg-amber-400' : 'bg-emerald-400')} animate-ping opacity-70`} />
+            )}
           </div>
         </div>
-      )}
+
+        {/* ── LIVE INTERACTIVE DETECTION PANEL (AI Overlay) ── */}
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[92%] max-w-sm pointer-events-auto z-20">
+          {activeMode === "live" ? (
+            <div className="bg-slate-950/90 backdrop-blur-md border border-slate-800/80 p-3 rounded-xl flex items-center justify-between shadow-2xl transition-all">
+              <div className="flex items-center space-x-3 min-w-0 flex-1">
+                <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+                  isAnalyzingLive 
+                    ? "bg-sky-500/10 text-sky-400" 
+                    : !autoIsFood && autoDetectedFood !== "Belum ada objek"
+                      ? "bg-amber-500/10 text-amber-400" 
+                      : "bg-emerald-500/10 text-emerald-400"
+                }`}>
+                  {isAnalyzingLive ? (
+                    <div className="w-4 h-4 border-2 border-sky-400 border-t-transparent rounded-full animate-spin" />
+                  ) : !autoIsFood && autoDetectedFood !== "Belum ada objek" ? (
+                    <AlertCircle size={18} />
+                  ) : (
+                    <Sparkles size={16} className="animate-pulse" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <span className="text-[8px] uppercase tracking-wider text-slate-400 font-extrabold block">
+                    {isAnalyzingLive ? "Menganalisis Gemini AI..." : "Terdeteksi secara Otomatis"}
+                  </span>
+                  <h3 className="text-xs font-black text-white truncate">
+                    {autoDetectedFood}
+                  </h3>
+                  {!autoIsFood && !isAnalyzingLive && autoDetectedFood !== "Belum ada objek" && (
+                    <span className="text-[8px] text-amber-300 font-bold block bg-amber-500/10 py-0.5 px-1.5 rounded w-max mt-0.5">
+                      Objek Non-Makanan
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="text-right shrink-0 pl-3">
+                <span className={`text-xs font-black ${
+                  isAnalyzingLive 
+                    ? "text-sky-400" 
+                    : !autoIsFood && autoDetectedFood !== "Belum ada objek"
+                      ? "text-amber-400" 
+                      : "text-emerald-400"
+                }`}>
+                  {autoDetectedFood === "Belum ada objek" ? "0%" : `${(autoDetectedConf * 100).toFixed(0)}%`}
+                </span>
+                <p className="text-[8px] text-slate-400">akurasi</p>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-slate-950/90 backdrop-blur-md border border-slate-800/80 p-3 rounded-xl flex items-center justify-between shadow-2xl transition-all">
+              <div className="flex items-center space-x-3 min-w-0 flex-1">
+                <div className="w-9 h-9 rounded-lg bg-slate-900 text-slate-400 flex items-center justify-center shrink-0">
+                  <Camera size={18} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <span className="text-[8px] uppercase tracking-wider text-slate-400 font-extrabold block">
+                    Mode Shutter Manual
+                  </span>
+                  <h3 className="text-xs font-black text-white truncate">
+                    {activeImage ? "Siap Mengambil Gambar" : "Posisikan hidangan dalam bingkai"}
+                  </h3>
+                </div>
+              </div>
+              <div className="text-right shrink-0 pl-3">
+                <span className="text-xs font-black text-emerald-400 bg-emerald-500/10 py-0.5 px-1.5 rounded-md">
+                  READY
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
+      </div>
+
+      {/* ── BOTTOM CONTROL DASHBOARD ── */}
+      <div className="absolute bottom-0 left-0 right-0 h-[280px] bg-gradient-to-t from-slate-950 via-slate-950 to-slate-950/95 border-t border-slate-900 p-4 flex flex-col justify-between z-20">
+        
+        {/* Mode Switcher AND Presets/Upload Area */}
+        <div className="w-full flex flex-col">
+          {/* Mode Switcher is ALWAYS rendered first! */}
+          <div className="bg-slate-900 border border-slate-800 p-0.5 rounded-full flex items-center w-full max-w-xs mx-auto mb-3">
+            <button
+              onClick={() => {
+                setActiveMode("live");
+                if (!activeImage && PRESET_SAMPLES.length > 0 && errorMsg) {
+                  loadAndClassifyPreset(PRESET_SAMPLES[0].name, PRESET_SAMPLES[0].url);
+                }
+              }}
+              className={`flex-1 py-1.5 px-3 text-[10px] font-black rounded-full transition-all flex items-center justify-center space-x-1.5 ${
+                activeMode === "live"
+                  ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/20"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${activeMode === 'live' ? 'bg-white' : 'bg-slate-400'} animate-pulse`}></span>
+              <span>Live Deteksi</span>
+            </button>
+            <button
+              onClick={() => setActiveMode("shutter")}
+              className={`flex-1 py-1.5 px-3 text-[10px] font-black rounded-full transition-all flex items-center justify-center space-x-1.5 ${
+                activeMode === "shutter"
+                  ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/20"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <Camera size={12} />
+              <span>Shutter Manual</span>
+            </button>
+          </div>
+
+          {/* Preset Samples & Gallery Upload for Simulator Mode */}
+          {errorMsg && (
+            <div className="w-full">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                  Uji Coba Objek Simulasi:
+                </span>
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="text-[10px] text-sky-400 font-black hover:underline flex items-center space-x-1"
+                >
+                  <Upload size={10} />
+                  <span>Unggah Foto Sendiri</span>
+                </button>
+              </div>
+              
+              {/* Horizontal scrolling preset cards */}
+              <div className="flex space-x-2.5 overflow-x-auto pb-2 scrollbar-none">
+                {PRESET_SAMPLES.map((preset) => {
+                  const isSelected = selectedPresetName === preset.name;
+                  return (
+                    <button
+                      key={preset.name}
+                      onClick={() => loadAndClassifyPreset(preset.name, preset.url)}
+                      className={`flex items-center space-x-2 p-1.5 px-3 rounded-lg border shrink-0 transition-all ${
+                        isSelected
+                          ? "bg-emerald-500/10 border-emerald-500 text-white shadow-md shadow-emerald-500/5"
+                          : "bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700"
+                      }`}
+                    >
+                      <div className="w-6 h-6 rounded-md overflow-hidden bg-slate-800 shrink-0">
+                        <img src={preset.url} alt={preset.name} className="w-full h-full object-cover" />
+                      </div>
+                      <span className="text-[10px] font-bold">{preset.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Trigger Button Area */}
+        <div className="w-full flex flex-col items-center">
+          
+          <div className="w-full flex items-center justify-between px-6 max-w-sm mb-3">
+            {/* Left: Gallery Button */}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="w-12 h-12 rounded-full bg-slate-900/80 border border-slate-800 text-slate-200 flex flex-col items-center justify-center hover:bg-slate-800 active:scale-90 transition-all cursor-pointer shadow-lg"
+              title="Ambil dari Galeri"
+            >
+              <ImageIcon size={20} />
+              <span className="text-[7px] font-bold mt-0.5 text-slate-400">Galeri</span>
+            </button>
+
+            {/* Center: Large Shutter Button (Jepret) */}
+            <button
+              onClick={handleCapture}
+              disabled={!activeImage && !!errorMsg}
+              className={`relative w-20 h-20 rounded-full flex items-center justify-center transition-all cursor-pointer border-4 ${
+                !activeImage && errorMsg
+                  ? "border-slate-800 bg-slate-900 text-slate-500 cursor-not-allowed"
+                  : activeMode === "live"
+                    ? "border-emerald-500/50 bg-emerald-500 hover:bg-emerald-600 active:scale-95 shadow-[0_0_20px_rgba(16,185,129,0.4)]"
+                    : "border-white/50 bg-white hover:bg-slate-100 active:scale-95 shadow-[0_0_20px_rgba(255,255,255,0.2)]"
+              }`}
+              title={activeMode === "live" ? "Jepret & Analisis Cerdas" : "Jepret Foto Manual"}
+            >
+              {activeMode === "live" ? (
+                <Sparkles size={26} className="text-white animate-pulse" />
+              ) : (
+                <Camera size={26} className="text-slate-950" />
+              )}
+            </button>
+
+            {/* Right: Quick Back Button */}
+            <button
+              onClick={onBack}
+              className="w-12 h-12 rounded-full bg-slate-900/80 border border-slate-800 text-slate-200 flex flex-col items-center justify-center hover:bg-slate-800 active:scale-90 transition-all cursor-pointer shadow-lg"
+              title="Kembali ke Dashboard"
+            >
+              <ArrowLeft size={20} />
+              <span className="text-[7px] font-bold mt-0.5 text-slate-400">Kembali</span>
+            </button>
+          </div>
+
+          <span className="text-[10px] font-black tracking-wider text-slate-300 block mb-1">
+            {activeMode === "live" 
+              ? (autoDetectedFood !== "Belum ada objek" ? `Jepret: ${autoDetectedFood}` : "Jepret & Analisis Cerdas") 
+              : "Jepret Foto Manual"}
+          </span>
+          
+          <p className="text-[8px] text-slate-400 text-center leading-relaxed max-w-xs px-2">
+            {errorMsg 
+              ? activeMode === "live"
+                ? "Mode Simulasi Real-Time: Pilih sampel makanan di atas atau klik Galeri untuk unggah dan pindaian otomatis oleh Gemini AI."
+                : "Mode Simulasi Manual: Pilih sampel makanan di atas lalu ketuk tombol jepret di tengah untuk memproses secara manual."
+              : activeMode === "live"
+                ? "Arahkan kamera ke hidangan. AI mengenali makanan secara otomatis secara real-time. Ketuk tombol Jepret Cerdas di tengah untuk analisis gizi."
+                : "Arahkan kamera ke hidangan. Cukup bidik objek dalam bingkai, lalu ketuk tombol Jepret Putih di tengah untuk mengambil gambar dan menganalisis."}
+          </p>
+        </div>
+
+      </div>
 
       {/* ── PERSISTENT CSS STYLES FOR THE ANIMATED SCAN LASER LINE ── */}
       <style>{`
         @keyframes scanEffect {
-          0% { top: 20%; opacity: 0.3; }
-          50% { top: 75%; opacity: 1; }
-          100% { top: 20%; opacity: 0.3; }
+          0% { top: 10%; opacity: 0.2; }
+          50% { top: 90%; opacity: 1; }
+          100% { top: 10%; opacity: 0.2; }
+        }
+        .scrollbar-none::-webkit-scrollbar {
+          display: none;
+        }
+        .scrollbar-none {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
         }
       `}</style>
     </div>

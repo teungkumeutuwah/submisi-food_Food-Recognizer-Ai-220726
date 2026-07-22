@@ -575,10 +575,48 @@ function generateSimulationExtraFields(foodName: string) {
 }
 
 
+// Helper to extract the first valid JSON object string from a response
+function extractFirstJSONObject(str: string): string {
+  const firstBrace = str.indexOf("{");
+  if (firstBrace === -1) return "{}";
+  
+  let braceCount = 0;
+  let inString = false;
+  let escape = false;
+  
+  for (let i = firstBrace; i < str.length; i++) {
+    const char = str[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (char === "\\") {
+      escape = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (!inString) {
+      if (char === "{") {
+        braceCount++;
+      } else if (char === "}") {
+        braceCount--;
+        if (braceCount === 0) {
+          return str.substring(firstBrace, i + 1);
+        }
+      }
+    }
+  }
+  return str.substring(firstBrace);
+}
+
+
 // --- API Endpoint: Fast Real-Time Object Classification ---
 app.post("/api/classify", async (req, res) => {
   try {
-    const { image } = req.body;
+    const { image, presetName } = req.body;
     if (!image) {
       return res.status(400).json({ error: "No image base64 provided" });
     }
@@ -599,7 +637,7 @@ app.post("/api/classify", async (req, res) => {
       try {
         const client = getGeminiClient();
         const response = await client.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: "gemini-3.5-flash",
           contents: [
             {
               inlineData: {
@@ -615,21 +653,45 @@ app.post("/api/classify", async (req, res) => {
         });
 
         const text = response.text || "{}";
-        const data = JSON.parse(text);
+        const cleanJson = extractFirstJSONObject(text);
+        const data = JSON.parse(cleanJson);
         return res.json({
-          name: data.name || "Sate Ayam",
-          isFood: data.isFood !== undefined ? data.isFood : true,
+          name: data.name || presetName || "Sate Ayam",
+          isFood: data.isFood !== undefined ? data.isFood : (presetName ? presetName.toLowerCase() !== "laptop" : true),
           confidence: data.confidence || 0.92
         });
       } catch (geminiErr: any) {
-        console.error("Gemini Real-time classification error, falling back to local simulation:", geminiErr);
+        const errMessage = String(geminiErr?.message || geminiErr);
+        const isQuota = errMessage.includes("429") || errMessage.toLowerCase().includes("quota") || errMessage.includes("RESOURCE_EXHAUSTED");
+        console.log(`[Info] Gemini Real-time classification fallback triggered (isQuota=${isQuota}).`);
+        
+        if (presetName) {
+          const isFood = presetName.toLowerCase() !== "laptop";
+          return res.json({ 
+            name: presetName, 
+            isFood, 
+            confidence: 0.96,
+            isSimulated: true,
+            isQuotaExceeded: isQuota
+          });
+        }
         // Fall back to a random delicious local food
         const randomIndex = Math.floor(Math.random() * FALLBACK_LABELS.length);
         const name = FALLBACK_LABELS[randomIndex];
-        return res.json({ name, isFood: true, confidence: 0.88 });
+        return res.json({ 
+          name, 
+          isFood: true, 
+          confidence: 0.88,
+          isSimulated: true,
+          isQuotaExceeded: isQuota
+        });
       }
     } else {
       // Offline/simulation fallback
+      if (presetName) {
+        const isFood = presetName.toLowerCase() !== "laptop";
+        return res.json({ name: presetName, isFood, confidence: 0.96 });
+      }
       const randomIndex = Math.floor(Math.random() * FALLBACK_LABELS.length);
       const name = FALLBACK_LABELS[randomIndex];
       return res.json({ name, isFood: true, confidence: 0.88 });
@@ -941,13 +1003,7 @@ app.post("/api/scan", upload.single("image"), async (req, res) => {
 
         const textResponse = response.text?.trim() || "";
         
-        // Robust JSON extraction
-        const firstBrace = textResponse.indexOf("{");
-        const lastBrace = textResponse.lastIndexOf("}");
-        let cleanJson = textResponse;
-        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-          cleanJson = textResponse.substring(firstBrace, lastBrace + 1);
-        }
+        const cleanJson = extractFirstJSONObject(textResponse);
         
         parsed = JSON.parse(cleanJson);
 
@@ -1131,14 +1187,15 @@ app.post("/api/health-tips", express.json(), async (req, res) => {
 
         if (response && response.text) {
           const text = response.text.trim();
-          const parsed = JSON.parse(text);
+          const cleanJson = extractFirstJSONObject(text);
+          const parsed = JSON.parse(cleanJson);
           if (Array.isArray(parsed.healthTips)) {
             dynamicTips = parsed.healthTips;
             console.log(`Successfully generated dynamic tips via Gemini for ${name}:`, dynamicTips);
           }
         }
       } catch (geminiError) {
-        console.error("Gagal men-generate tips kesehatan dinamis menggunakan Gemini:", geminiError);
+        console.log("Failed to generate dynamic health tips via Gemini; using local fallback tips.");
       }
     }
 

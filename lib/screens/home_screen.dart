@@ -224,7 +224,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           width: 48,
                           height: 5,
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.15),
+                            color: Colors.white.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(10),
                           ),
                         ),
@@ -263,7 +263,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               child: Container(
                                 padding: const EdgeInsets.all(6),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.08),
+                                  color: Colors.white.withValues(alpha: 0.08),
                                   shape: BoxShape.circle,
                                 ),
                                 child: const Icon(Icons.close, color: Colors.white70, size: 18),
@@ -286,10 +286,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                 width: double.infinity,
                                 padding: const EdgeInsets.only(top: 16, right: 16, left: 0, bottom: 8),
                                 decoration: BoxDecoration(
-                                  color: Colors.black.withOpacity(0.2),
+                                  color: Colors.black.withValues(alpha: 0.2),
                                   borderRadius: BorderRadius.circular(20),
                                   border: Border.all(
-                                    color: Colors.white.withOpacity(0.05),
+                                    color: Colors.white.withValues(alpha: 0.05),
                                     width: 1,
                                   ),
                                 ),
@@ -370,10 +370,10 @@ class _HomeScreenState extends State<HomeScreen> {
                               Container(
                                 padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.04),
+                                  color: Colors.white.withValues(alpha: 0.04),
                                   borderRadius: BorderRadius.circular(16),
                                   border: Border.all(
-                                    color: Colors.white.withOpacity(0.06),
+                                    color: Colors.white.withValues(alpha: 0.06),
                                     width: 1,
                                   ),
                                 ),
@@ -530,7 +530,7 @@ class _HomeScreenState extends State<HomeScreen> {
           drawVerticalLine: false,
           getDrawingHorizontalLine: (value) {
             return FlLine(
-              color: Colors.white.withOpacity(0.04),
+              color: Colors.white.withValues(alpha: 0.04),
               strokeWidth: 1,
               dashArray: [5, 5],
             );
@@ -557,7 +557,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 backDrawRodData: BackgroundBarChartRodData(
                   show: true,
                   toY: maxVal,
-                  color: Colors.white.withOpacity(0.02),
+                  color: Colors.white.withValues(alpha: 0.02),
                 ),
               ),
             ],
@@ -578,10 +578,10 @@ class _HomeScreenState extends State<HomeScreen> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.03),
+        color: Colors.white.withValues(alpha: 0.03),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: Colors.white.withOpacity(0.05),
+          color: Colors.white.withValues(alpha: 0.05),
           width: 1,
         ),
       ),
@@ -590,7 +590,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
+              color: color.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(icon, color: color, size: 18),
@@ -735,7 +735,7 @@ class _HomeScreenState extends State<HomeScreen> {
       );
 
       if (scannedFood != null) {
-        final ScannedFood baseFood = scannedFood;
+        final ScannedFood baseFood = scannedFood!;
         ScannedFood finalFood = baseFood;
         // 3. Panggil MealDB API menggunakan nama makanan dari LiteRT
         try {
@@ -951,7 +951,7 @@ class _HomeScreenState extends State<HomeScreen> {
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF0F172A).withOpacity(0.2),
+            color: const Color(0xFF0F172A).withValues(alpha: 0.2),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
@@ -995,7 +995,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       // Target Empty Gap (Grey if today's intake is low)
                       if (_todayCalories < 1)
                         PieChartSectionData(
-                          color: Colors.white.withOpacity(0.1),
+                          color: Colors.white.withValues(alpha: 0.1),
                           value: 100,
                           title: '',
                           radius: 5,
@@ -1095,11 +1095,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     style: TextButton.styleFrom(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      backgroundColor: Colors.white.withOpacity(0.05),
+                      backgroundColor: Colors.white.withValues(alpha: 0.05),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20),
                         side: BorderSide(
-                          color: Colors.white.withOpacity(0.08),
+                          color: Colors.white.withValues(alpha: 0.08),
                           width: 1,
                         ),
                       ),
@@ -1141,7 +1141,7 @@ class _HomeScreenState extends State<HomeScreen> {
           borderRadius: BorderRadius.circular(3),
           child: LinearProgressIndicator(
             value: pct,
-            backgroundColor: Colors.white.withOpacity(0.08),
+            backgroundColor: Colors.white.withValues(alpha: 0.08),
             valueColor: AlwaysStoppedAnimation<Color>(color),
             minHeight: 4,
           ),
